@@ -19,12 +19,18 @@ use cosmic::{
         table::{ItemCategory, ItemInterface},
     },
 };
-use std::{any::TypeId, collections::HashMap, env, error::Error};
+use std::{
+    any::TypeId,
+    collections::{HashMap, VecDeque},
+    env,
+    error::Error,
+    time::{Duration, Instant},
+};
 
 use config::{AppTheme, CONFIG_VERSION, Config};
 mod config;
 
-use info::{ProcessCategory, ProcessItem};
+use info::{GraphItem, ProcessCategory, ProcessItem};
 mod info;
 
 mod localize;
@@ -33,8 +39,6 @@ use menu::menu_bar;
 mod menu;
 
 use clap_lex::RawArgs;
-
-use crate::info::CpuItem;
 
 #[rustfmt::skip]
 fn main() -> Result<(), Box<dyn Error>> {
@@ -144,7 +148,7 @@ pub enum Message {
     None,
     AppTheme(AppTheme),
     Config(Box<Config>),
-    Cpus(Vec<CpuItem>),
+    Graph(GraphItem),
     LaunchUrl(String),
     Processes(Vec<ProcessItem>),
     ProcessSort(ProcessCategory),
@@ -163,13 +167,19 @@ pub enum ContextPage {
 pub enum NavPage {
     Processes,
     CPU,
+    Memory,
 }
 
 impl NavPage {
+    pub fn all() -> &'static [Self] {
+        &[Self::Processes, Self::CPU, Self::Memory]
+    }
+
     pub fn title(&self) -> String {
         match self {
             Self::Processes => fl!("processes"),
             Self::CPU => fl!("cpu"),
+            Self::Memory => fl!("memory"),
         }
     }
 }
@@ -182,8 +192,8 @@ pub struct App {
     config_handler: Option<cosmic_config::Config>,
     context_page: ContextPage,
     core: Core,
-    cpus: Vec<CpuItem>,
-    cpus_snapshot: Vec<CpuItem>,
+    graph_history: VecDeque<GraphItem>,
+    graph_snapshot: Option<GraphItem>,
     key_binds: HashMap<KeyBind, Action>,
     nav_model: segmented_button::SingleSelectModel,
     processes: Vec<ProcessItem>,
@@ -292,7 +302,7 @@ impl Application for App {
             ]);
 
         let mut nav_model = nav_bar::Model::builder();
-        for &page in &[NavPage::Processes, NavPage::CPU] {
+        for &page in NavPage::all() {
             nav_model = nav_model.insert(|mut b| {
                 if matches!(page, NavPage::Processes) {
                     b = b.activate();
@@ -308,8 +318,8 @@ impl Application for App {
             config_handler: flags.config_handler,
             context_page: ContextPage::Settings,
             core,
-            cpus: Vec::new(),
-            cpus_snapshot: Vec::new(),
+            graph_history: VecDeque::new(),
+            graph_snapshot: None,
             key_binds: HashMap::new(),
             nav_model: nav_model.build(),
             processes: Vec::new(),
@@ -335,7 +345,6 @@ impl Application for App {
 
     fn on_nav_select(&mut self, id: nav_bar::Id) -> Task<Self::Message> {
         self.nav_model.activate(id);
-        eprintln!("{:?}: {:?}", id, self.nav_model.active_data::<NavPage>());
         Task::none()
     }
 
@@ -374,8 +383,11 @@ impl Application for App {
                     return self.update_config();
                 }
             }
-            Message::Cpus(cpus) => {
-                self.cpus = cpus;
+            Message::Graph(graph_item) => {
+                self.graph_history.push_back(graph_item);
+                let now = Instant::now();
+                self.graph_history
+                    .retain(|x| now.saturating_duration_since(x.time) < Duration::from_secs(60));
             }
             Message::LaunchUrl(url) => {
                 if let Err(err) = open::that_detached(&url) {
@@ -384,7 +396,7 @@ impl Application for App {
             }
             Message::Processes(processes) => {
                 // Snapshot of CPUs whenever processes refresh for progress bars
-                self.cpus_snapshot = self.cpus.clone();
+                self.graph_snapshot = self.graph_history.back().cloned();
                 self.processes = processes;
                 self.update_processes();
             }
@@ -504,24 +516,55 @@ impl Application for App {
                     .into()
             }
             NavPage::CPU => {
-                let mut column =
-                    widget::column::with_capacity(self.cpus_snapshot.len()).width(Length::Fill);
-                for cpu in self.cpus_snapshot.iter() {
-                    let mut row = widget::row::with_capacity(2).align_y(Alignment::Center);
-                    row = row.push(
-                        widget::determinate_linear(cpu.cpu_usage / 100.0)
-                            .girth(12.0)
-                            .width(240.0),
-                    );
-                    row = row.push(
-                        widget::text(format!("{:.1}%", cpu.cpu_usage))
-                            .align_x(Alignment::End)
-                            .width(48.0),
-                    );
-                    column = column.push(widget::text::heading(&cpu.name));
-                    column = column.push(row);
+                if let Some(graph_item) = &self.graph_snapshot {
+                    let mut column =
+                        widget::column::with_capacity(graph_item.cpus.len()).width(Length::Fill);
+                    for cpu in graph_item.cpus.iter() {
+                        let mut row = widget::row::with_capacity(2).align_y(Alignment::Center);
+                        row = row.push(
+                            widget::determinate_linear(cpu.cpu_usage / 100.0)
+                                .girth(12.0)
+                                .width(240.0),
+                        );
+                        row = row.push(
+                            widget::text(format!("{:.1}%", cpu.cpu_usage))
+                                .align_x(Alignment::End)
+                                .width(48.0),
+                        );
+                        column = column.push(widget::text::heading(&cpu.name));
+                        column = column.push(row);
+                    }
+                    column.into()
+                } else {
+                    widget::indeterminate_circular().into()
                 }
-                column.into()
+            }
+            NavPage::Memory => {
+                if let Some(graph_item) = &self.graph_snapshot {
+                    let mem = &graph_item.memory;
+                    let mut column = widget::column::with_capacity(4).width(Length::Fill);
+                    column = column.push(widget::text(format!(
+                        "Memory used: {} ({:.1}%)",
+                        humansize::format_size(mem.used, humansize::BINARY),
+                        100.0 * (mem.used as f64) / (mem.total as f64)
+                    )));
+                    column = column.push(widget::text(format!(
+                        "Memory total: {}",
+                        humansize::format_size(mem.total, humansize::BINARY)
+                    )));
+                    column = column.push(widget::text(format!(
+                        "Swap used: {} ({:.1}%)",
+                        humansize::format_size(mem.swap_used, humansize::BINARY),
+                        100.0 * (mem.swap_used as f64) / (mem.swap_total as f64)
+                    )));
+                    column = column.push(widget::text(format!(
+                        "Swap total: {}",
+                        humansize::format_size(mem.swap_total, humansize::BINARY)
+                    )));
+                    column.into()
+                } else {
+                    widget::indeterminate_circular().into()
+                }
             }
         };
         widget::scrollable(content)

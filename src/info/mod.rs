@@ -2,7 +2,10 @@ use cosmic::iced::{
     futures::{SinkExt, Stream},
     stream,
 };
-use std::{thread, time::Duration};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind, Users};
 use tokio::sync::mpsc;
 
@@ -11,11 +14,21 @@ use crate::Message;
 mod cpu;
 pub use self::cpu::*;
 
+mod memory;
+pub use self::memory::*;
+
 mod process;
 pub use self::process::*;
 
+#[derive(Clone, Debug)]
+pub struct GraphItem {
+    pub time: Instant,
+    pub cpus: Vec<CpuItem>,
+    pub memory: MemoryItem,
+}
+
 pub fn worker() -> impl Stream<Item = Message> {
-    stream::channel(1, async |mut output| {
+    stream::channel(16, async |mut output| {
         let (tx, mut rx) = mpsc::channel(1);
 
         //TODO: configurable refresh times
@@ -28,13 +41,21 @@ pub fn worker() -> impl Stream<Item = Message> {
             thread::spawn(move || {
                 let mut sys = System::new();
                 loop {
+                    let time = Instant::now();
                     sys.refresh_cpu_usage();
+                    sys.refresh_memory();
+
                     let cpus = sys.cpus();
                     let mut cpu_items = Vec::with_capacity(cpus.len());
                     for cpu in cpus {
                         cpu_items.push(CpuItem::new(cpu));
                     }
-                    match tx.blocking_send(Message::Cpus(cpu_items)) {
+
+                    match tx.blocking_send(Message::Graph(GraphItem {
+                        time,
+                        cpus: cpu_items,
+                        memory: MemoryItem::new(&sys),
+                    })) {
                         Ok(()) => {}
                         Err(_) => break,
                     }

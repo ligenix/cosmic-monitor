@@ -5,6 +5,7 @@ keywords = Monitor;System;Process;CPU;Memory;Network;History;Usage;
 # Nav Pages
 processes = Processes
 cpu = CPU
+memory = Memory
 
 # Context Pages
 
