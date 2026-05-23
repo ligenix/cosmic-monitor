@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use sysinfo::Disk;
 
 #[derive(Clone, Debug)]
@@ -5,14 +7,19 @@ pub struct DiskItem {
     pub name: String,
     pub used: u64,
     pub total: u64,
+    pub read: f64,
+    pub write: f64,
 }
 
 impl DiskItem {
-    pub fn new(disk: &Disk) -> Self {
+    pub fn new(disk: &Disk, refresh: Duration) -> Self {
+        let usage = disk.usage();
         Self {
             name: disk.name().to_string_lossy().into(),
             used: disk.total_space() - disk.available_space(),
             total: disk.total_space(),
+            read: (usage.read_bytes as f64) / refresh.as_secs_f64(),
+            write: (usage.written_bytes as f64) / refresh.as_secs_f64(),
         }
     }
 }

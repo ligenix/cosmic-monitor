@@ -6,7 +6,10 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use sysinfo::{Disks, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind, Users};
+use sysinfo::{
+    CpuRefreshKind, Disks, MemoryRefreshKind, Networks, ProcessRefreshKind, RefreshKind, System,
+    UpdateKind, Users,
+};
 use tokio::sync::mpsc;
 
 use crate::Message;
@@ -20,6 +23,9 @@ pub use self::disk::*;
 mod memory;
 pub use self::memory::*;
 
+mod network;
+pub use self::network::*;
+
 mod process;
 pub use self::process::*;
 
@@ -29,6 +35,43 @@ pub struct GraphItem {
     pub cpus: Vec<CpuItem>,
     pub disks: Vec<DiskItem>,
     pub memory: MemoryItem,
+    pub networks: Vec<NetworkItem>,
+}
+
+impl GraphItem {
+    pub fn new(
+        time: Instant,
+        sys: &System,
+        disks: &Disks,
+        networks: &Networks,
+        refresh: Duration,
+    ) -> Self {
+        let cpus = sys.cpus();
+        let mut cpu_items = Vec::with_capacity(cpus.len());
+        for cpu in cpus {
+            cpu_items.push(CpuItem::new(cpu));
+        }
+
+        let disk_list = disks.list();
+        let mut disk_items = Vec::with_capacity(disk_list.len());
+        for disk in disk_list {
+            disk_items.push(DiskItem::new(disk, refresh));
+        }
+
+        let network_list = networks.list();
+        let mut network_items = Vec::with_capacity(network_list.len());
+        for (name, data) in network_list.iter() {
+            network_items.push(NetworkItem::new(name, data, refresh));
+        }
+
+        Self {
+            time,
+            cpus: cpu_items,
+            disks: disk_items,
+            memory: MemoryItem::new(&sys),
+            networks: network_items,
+        }
+    }
 }
 
 pub fn worker() -> impl Stream<Item = Message> {
@@ -45,54 +88,53 @@ pub fn worker() -> impl Stream<Item = Message> {
             thread::spawn(move || {
                 let mut sys = System::new();
                 let mut disks = Disks::new();
+                let mut networks = Networks::new();
                 loop {
                     let time = Instant::now();
-                    sys.refresh_cpu_usage();
-                    sys.refresh_memory();
+                    sys.refresh_specifics(
+                        RefreshKind::nothing()
+                            .with_cpu(CpuRefreshKind::nothing().with_cpu_usage())
+                            .with_memory(MemoryRefreshKind::nothing().with_ram().with_swap()),
+                    );
                     disks.refresh(true);
+                    networks.refresh(true);
 
-                    let cpus = sys.cpus();
-                    let mut cpu_items = Vec::with_capacity(cpus.len());
-                    for cpu in cpus {
-                        cpu_items.push(CpuItem::new(cpu));
-                    }
-
-                    let disk_list = disks.list();
-                    let mut disk_items = Vec::with_capacity(disk_list.len());
-                    for disk in disk_list {
-                        disk_items.push(DiskItem::new(disk));
-                    }
-
-                    match tx.blocking_send(Message::Graph(GraphItem {
-                        time,
-                        cpus: cpu_items,
-                        disks: disk_items,
-                        memory: MemoryItem::new(&sys),
-                    })) {
+                    let graph_item = GraphItem::new(time, &sys, &disks, &networks, graph_refresh);
+                    match tx.blocking_send(Message::Graph(graph_item)) {
                         Ok(()) => {}
                         Err(_) => break,
                     }
-
                     thread::sleep(graph_refresh);
                 }
             });
         }
 
-        // Gather process information
+        // Gather snapshot information
         thread::spawn(move || {
             //TODO: refresh users periodically?
             let users = Users::new_with_refreshed_list();
             let mut sys = System::new();
+            let mut disks = Disks::new();
+            let mut networks = Networks::new();
             loop {
-                sys.refresh_processes_specifics(
-                    ProcessesToUpdate::All,
-                    true,
-                    ProcessRefreshKind::nothing()
-                        .with_cpu()
-                        .with_disk_usage()
-                        .with_memory()
-                        .with_user(UpdateKind::OnlyIfNotSet),
+                let time = Instant::now();
+                sys.refresh_specifics(
+                    RefreshKind::nothing()
+                        .with_cpu(CpuRefreshKind::nothing().with_cpu_usage())
+                        .with_memory(MemoryRefreshKind::nothing().with_ram().with_swap())
+                        .with_processes(
+                            ProcessRefreshKind::nothing()
+                                .with_cpu()
+                                .with_disk_usage()
+                                .with_memory()
+                                .with_user(UpdateKind::OnlyIfNotSet),
+                        ),
                 );
+                disks.refresh(true);
+                networks.refresh(true);
+
+                let graph_item = GraphItem::new(time, &sys, &disks, &networks, processes_refresh);
+
                 let processes = sys.processes();
                 let mut process_items = Vec::with_capacity(processes.len());
                 for (_pid, process) in processes.iter() {
@@ -102,7 +144,8 @@ pub fn worker() -> impl Stream<Item = Message> {
                     }
                     process_items.push(ProcessItem::new(process, &users, processes_refresh));
                 }
-                match tx.blocking_send(Message::Processes(process_items)) {
+
+                match tx.blocking_send(Message::Snapshot(graph_item, process_items)) {
                     Ok(()) => {}
                     Err(_) => break,
                 }

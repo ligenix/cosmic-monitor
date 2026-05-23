@@ -150,8 +150,8 @@ pub enum Message {
     Config(Box<Config>),
     Graph(GraphItem),
     LaunchUrl(String),
-    Processes(Vec<ProcessItem>),
     ProcessSort(ProcessCategory),
+    Snapshot(GraphItem, Vec<ProcessItem>),
     Surface(surface::Action),
     SystemThemeChange,
     ToggleContextPage(ContextPage),
@@ -404,12 +404,6 @@ impl Application for App {
                     log::warn!("failed to open {:?}: {}", url, err);
                 }
             }
-            Message::Processes(processes) => {
-                // Snapshot of CPUs whenever processes refresh for progress bars
-                self.graph_snapshot = self.graph_history.back().cloned();
-                self.processes = processes;
-                self.update_processes();
-            }
             Message::ProcessSort(category) => {
                 if self.process_sort.0 == category {
                     self.process_sort.1 = !self.process_sort.1
@@ -417,6 +411,11 @@ impl Application for App {
                     self.process_sort.0 = category;
                     self.process_sort.1 = false;
                 }
+                self.update_processes();
+            }
+            Message::Snapshot(graph_item, processes) => {
+                self.graph_snapshot = Some(graph_item);
+                self.processes = processes;
                 self.update_processes();
             }
             Message::Surface(a) => {
@@ -552,7 +551,7 @@ impl Application for App {
             NavPage::Memory => {
                 if let Some(graph_item) = &self.graph_snapshot {
                     let mem = &graph_item.memory;
-                    let mut column = widget::column::with_capacity(4).width(Length::Fill);
+                    let mut column = widget::column::with_capacity(5).width(Length::Fill);
                     column = column.push(widget::text(format!(
                         "Memory used: {} ({:.1}%)",
                         humansize::format_size(mem.used, humansize::BINARY),
@@ -562,6 +561,7 @@ impl Application for App {
                         "Memory total: {}",
                         humansize::format_size(mem.total, humansize::BINARY)
                     )));
+                    column = column.push(widget::space().height(20.0));
                     column = column.push(widget::text(format!(
                         "Swap used: {} ({:.1}%)",
                         humansize::format_size(mem.swap_used, humansize::BINARY),
@@ -578,18 +578,26 @@ impl Application for App {
             }
             NavPage::Disk => {
                 if let Some(graph_item) = &self.graph_snapshot {
-                    let mut column = widget::column::with_capacity(graph_item.disks.len() * 4)
+                    let mut column = widget::column::with_capacity(graph_item.disks.len() * 6)
                         .width(Length::Fill);
                     for disk in graph_item.disks.iter() {
                         column = column.push(widget::text(format!("Name: {}", disk.name)));
                         column = column.push(widget::text(format!(
-                            "Disk used: {} ({:.1}%)",
-                            humansize::format_size(disk.used, humansize::BINARY),
+                            "Used: {} ({:.1}%)",
+                            humansize::format_size(disk.used, humansize::DECIMAL),
                             100.0 * (disk.used as f64) / (disk.total as f64)
                         )));
                         column = column.push(widget::text(format!(
-                            "Disk total: {}",
-                            humansize::format_size(disk.total, humansize::BINARY)
+                            "Total: {}",
+                            humansize::format_size(disk.total, humansize::DECIMAL)
+                        )));
+                        column = column.push(widget::text(format!(
+                            "Read: {}/s",
+                            humansize::format_size(disk.read as u64, humansize::DECIMAL)
+                        )));
+                        column = column.push(widget::text(format!(
+                            "Write: {}/s",
+                            humansize::format_size(disk.write as u64, humansize::DECIMAL)
                         )));
                         column = column.push(widget::space().height(20.0));
                     }
@@ -598,7 +606,27 @@ impl Application for App {
                     widget::indeterminate_circular().into()
                 }
             }
-            _ => widget::text("TODO").into(),
+            NavPage::Network => {
+                if let Some(graph_item) = &self.graph_snapshot {
+                    let mut column = widget::column::with_capacity(graph_item.networks.len() * 4)
+                        .width(Length::Fill);
+                    for net in graph_item.networks.iter() {
+                        column = column.push(widget::text(format!("Name: {}", net.name)));
+                        column = column.push(widget::text(format!(
+                            "Rx: {}/s",
+                            humansize::format_size(net.rx as u64, humansize::DECIMAL)
+                        )));
+                        column = column.push(widget::text(format!(
+                            "Tx: {}/s",
+                            humansize::format_size(net.tx as u64, humansize::DECIMAL)
+                        )));
+                        column = column.push(widget::space().height(20.0));
+                    }
+                    column.into()
+                } else {
+                    widget::indeterminate_circular().into()
+                }
+            }
         };
         widget::scrollable(content)
             .width(Length::Fill)
