@@ -6,13 +6,16 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind, Users};
+use sysinfo::{Disks, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind, Users};
 use tokio::sync::mpsc;
 
 use crate::Message;
 
 mod cpu;
 pub use self::cpu::*;
+
+mod disk;
+pub use self::disk::*;
 
 mod memory;
 pub use self::memory::*;
@@ -24,6 +27,7 @@ pub use self::process::*;
 pub struct GraphItem {
     pub time: Instant,
     pub cpus: Vec<CpuItem>,
+    pub disks: Vec<DiskItem>,
     pub memory: MemoryItem,
 }
 
@@ -35,15 +39,17 @@ pub fn worker() -> impl Stream<Item = Message> {
         let processes_refresh = Duration::from_millis(3000);
         let graph_refresh = sysinfo::MINIMUM_CPU_UPDATE_INTERVAL;
 
-        // Gather CPU information
+        // Gather graph information
         {
             let tx = tx.clone();
             thread::spawn(move || {
                 let mut sys = System::new();
+                let mut disks = Disks::new();
                 loop {
                     let time = Instant::now();
                     sys.refresh_cpu_usage();
                     sys.refresh_memory();
+                    disks.refresh(true);
 
                     let cpus = sys.cpus();
                     let mut cpu_items = Vec::with_capacity(cpus.len());
@@ -51,9 +57,16 @@ pub fn worker() -> impl Stream<Item = Message> {
                         cpu_items.push(CpuItem::new(cpu));
                     }
 
+                    let disk_list = disks.list();
+                    let mut disk_items = Vec::with_capacity(disk_list.len());
+                    for disk in disk_list {
+                        disk_items.push(DiskItem::new(disk));
+                    }
+
                     match tx.blocking_send(Message::Graph(GraphItem {
                         time,
                         cpus: cpu_items,
+                        disks: disk_items,
                         memory: MemoryItem::new(&sys),
                     })) {
                         Ok(()) => {}

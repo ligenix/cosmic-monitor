@@ -168,11 +168,19 @@ pub enum NavPage {
     Processes,
     CPU,
     Memory,
+    Disk,
+    Network,
 }
 
 impl NavPage {
     pub fn all() -> &'static [Self] {
-        &[Self::Processes, Self::CPU, Self::Memory]
+        &[
+            Self::Processes,
+            Self::CPU,
+            Self::Memory,
+            Self::Disk,
+            Self::Network,
+        ]
     }
 
     pub fn title(&self) -> String {
@@ -180,6 +188,8 @@ impl NavPage {
             Self::Processes => fl!("processes"),
             Self::CPU => fl!("cpu"),
             Self::Memory => fl!("memory"),
+            Self::Disk => fl!("disk"),
+            Self::Network => fl!("network"),
         }
     }
 }
@@ -566,6 +576,29 @@ impl Application for App {
                     widget::indeterminate_circular().into()
                 }
             }
+            NavPage::Disk => {
+                if let Some(graph_item) = &self.graph_snapshot {
+                    let mut column = widget::column::with_capacity(graph_item.disks.len() * 4)
+                        .width(Length::Fill);
+                    for disk in graph_item.disks.iter() {
+                        column = column.push(widget::text(format!("Name: {}", disk.name)));
+                        column = column.push(widget::text(format!(
+                            "Disk used: {} ({:.1}%)",
+                            humansize::format_size(disk.used, humansize::BINARY),
+                            100.0 * (disk.used as f64) / (disk.total as f64)
+                        )));
+                        column = column.push(widget::text(format!(
+                            "Disk total: {}",
+                            humansize::format_size(disk.total, humansize::BINARY)
+                        )));
+                        column = column.push(widget::space().height(20.0));
+                    }
+                    column.into()
+                } else {
+                    widget::indeterminate_circular().into()
+                }
+            }
+            _ => widget::text("TODO").into(),
         };
         widget::scrollable(content)
             .width(Length::Fill)

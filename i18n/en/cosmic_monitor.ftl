@@ -6,6 +6,8 @@ keywords = Monitor;System;Process;CPU;Memory;Network;History;Usage;
 processes = Processes
 cpu = CPU
 memory = Memory
+disk = Disk
+network = Network
 
 # Context Pages
 
