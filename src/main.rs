@@ -8,7 +8,7 @@ use cosmic::{
     executor,
     iced::{
         self, Alignment, Length, Limits, Subscription,
-        core::text::{Ellipsize, EllipsizeHeightLimit},
+        core::text::{Ellipsize, EllipsizeHeightLimit, Shaping},
     },
     surface,
     widget::{
@@ -501,12 +501,14 @@ impl Application for App {
                         move |_i, item| {
                             let mut row = widget::row::with_capacity(categories.len())
                                 .align_y(Alignment::Center);
-                            for category in categories {
+                            for &category in categories {
                                 row = row.push(
                                     widget::container(
-                                        widget::text(item.get_text(*category)).ellipsize(
-                                            Ellipsize::End(EllipsizeHeightLimit::Lines(1)),
-                                        ),
+                                        widget::text(item.text(category))
+                                            .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(
+                                                1,
+                                            )))
+                                            .shaping(Shaping::Basic),
                                     )
                                     .align_x(category.data_align())
                                     .align_y(Alignment::Center)

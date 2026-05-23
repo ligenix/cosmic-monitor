@@ -88,11 +88,16 @@ impl ItemCategory for ProcessCategory {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessItem {
     pub cpu_usage: u32,
+    pub cpu_usage_str: String,
     pub disk_read: u64,
+    pub disk_read_str: String,
     pub disk_write: u64,
+    pub disk_write_str: String,
     pub memory: u64,
+    pub memory_str: String,
     pub name: String,
     pub pid: Pid,
+    pub pid_str: String,
     pub priority: Option<i32>,
     pub username: String,
 }
@@ -106,8 +111,6 @@ impl ProcessItem {
             },
             None => String::new(),
         };
-
-        let disk_usage = p.disk_usage();
 
         let mut priority = None;
 
@@ -123,15 +126,70 @@ impl ProcessItem {
             }
         }
 
+        let cpu_usage = (p.cpu_usage() * 10.0) as u32;
+        let cpu_usage_str = format!("{}.{}%", cpu_usage / 10, cpu_usage % 10);
+
+        let disk_usage = p.disk_usage();
+        let disk_read = disk_usage.read_bytes / refresh.as_secs();
+        let disk_read_str = format!(
+            "{}/s",
+            humansize::format_size(disk_read, humansize::DECIMAL)
+        );
+        let disk_write = disk_usage.written_bytes / refresh.as_secs();
+        let disk_write_str = format!(
+            "{}/s",
+            humansize::format_size(disk_write, humansize::DECIMAL)
+        );
+
+        let memory = p.memory();
+        let memory_str = format!("{}", humansize::format_size(memory, humansize::BINARY));
+
+        let pid = p.pid();
+        let pid_str = pid.to_string();
+
         Self {
-            cpu_usage: (p.cpu_usage() * 10.0) as u32,
-            disk_read: disk_usage.read_bytes / refresh.as_secs(),
-            disk_write: disk_usage.written_bytes / refresh.as_secs(),
-            memory: p.memory(),
+            cpu_usage,
+            cpu_usage_str,
+            disk_read,
+            disk_read_str,
+            disk_write,
+            disk_write_str,
+            memory,
+            memory_str,
             name: p.name().to_string_lossy().into(),
-            pid: p.pid(),
+            pid,
+            pid_str,
             priority,
             username,
+        }
+    }
+
+    // Like get_text but without allocation
+    pub fn text(&self, category: ProcessCategory) -> &str {
+        match category {
+            ProcessCategory::Name => &self.name,
+            ProcessCategory::User => &self.username,
+            ProcessCategory::PID => &self.pid_str,
+            ProcessCategory::CPU => &self.cpu_usage_str,
+            ProcessCategory::Memory => &self.memory_str,
+            ProcessCategory::DiskRead => &self.disk_read_str,
+            ProcessCategory::DiskWrite => &self.disk_write_str,
+            //TODO: translate
+            ProcessCategory::Priority => self.priority.map_or("N/A", |x| {
+                if x < -7 {
+                    "Very high"
+                } else if x < -2 {
+                    "High"
+                } else if x < 3 {
+                    "Normal"
+                } else if x < 7 {
+                    "Low"
+                } else {
+                    "Very low"
+                }
+            }),
+            //TODO
+            _ => "TODO",
         }
     }
 }
@@ -143,43 +201,7 @@ impl ItemInterface<ProcessCategory> for ProcessItem {
 
     //TODO: Use Cow<'a, str> instead so borrows of strings work
     fn get_text(&self, category: ProcessCategory) -> Cow<'static, str> {
-        match category {
-            ProcessCategory::Name => Cow::Owned(self.name.clone()),
-            ProcessCategory::User => Cow::Owned(self.username.clone()),
-            ProcessCategory::PID => format!("{}", self.pid).into(),
-            ProcessCategory::CPU => {
-                format!("{}.{}%", self.cpu_usage / 10, self.cpu_usage % 10).into()
-            }
-            ProcessCategory::Memory => {
-                format!("{}", humansize::format_size(self.memory, humansize::BINARY)).into()
-            }
-            ProcessCategory::DiskRead => format!(
-                "{}/s",
-                humansize::format_size(self.disk_read, humansize::DECIMAL)
-            )
-            .into(),
-            ProcessCategory::DiskWrite => format!(
-                "{}/s",
-                humansize::format_size(self.disk_write, humansize::DECIMAL)
-            )
-            .into(),
-            //TODO: translate
-            ProcessCategory::Priority => self.priority.map_or("N/A".into(), |x| {
-                if x < -7 {
-                    "Very high".into()
-                } else if x < -2 {
-                    "High".into()
-                } else if x < 3 {
-                    "Normal".into()
-                } else if x < 7 {
-                    "Low".into()
-                } else {
-                    "Very low".into()
-                }
-            }),
-            //TODO
-            _ => "TODO".into(),
-        }
+        Cow::Owned(self.text(category).into())
     }
 
     fn compare(&self, other: &Self, category: ProcessCategory) -> Ordering {
