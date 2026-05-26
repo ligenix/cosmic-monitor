@@ -1,6 +1,6 @@
 use cosmic::{
     Renderer, Theme,
-    iced::{Color, Point, Rectangle, Size, mouse},
+    iced::{Color, Point, Rectangle, Size, alignment::Vertical, core::text::Alignment, mouse},
     widget::canvas,
 };
 use std::{collections::VecDeque, time::Instant};
@@ -41,46 +41,114 @@ impl<'a> canvas::Program<Message, Theme, Renderer> for Graph<'a> {
         let mut accent_color_0_5 = accent_color.clone();
         accent_color_0_5.a *= 0.5;
         let bg_component_color = Color::from(cosmic.bg_component_color());
-        let radius_s = cosmic.radius_s();
+        let on_bg_color = Color::from(cosmic.on_bg_color());
+        //TODO: design has radius_s but Canvas does not support clipping with border radius
+        //let bg_radius = cosmic.radius_s();
+        let bg_radius = cosmic.radius_0();
 
-        let calc_x = |time: f32| -> f32 { (1.0 - time / 60.0) * (bounds.width - 36.0) };
+        let calc_x = |time: f32| -> f32 { (1.0 - time / 60.0) * (bounds.width - 48.0) };
         let calc_y = |value: f32| -> f32 { (1.0 - value / 100.0) * (bounds.height - 20.0) };
 
-        let min_x = calc_x(0.0);
-        let max_x = calc_x(60.0);
-        let min_y = calc_y(0.0);
-        let max_y = calc_y(100.0);
+        let min_x = calc_x(60.0);
+        let max_x = calc_x(0.0);
+        let min_y = calc_y(100.0);
+        let max_y = calc_y(0.0);
 
         //TODO: use cache
         let mut frame = canvas::Frame::new(renderer, bounds.size());
 
+        let text = |string: &str,
+                    position: Point,
+                    align_x: Alignment,
+                    align_y: Vertical,
+                    frame: &mut canvas::Frame| {
+            let mut text = canvas::Text::from(string);
+            text.position = position;
+            text.color = on_bg_color;
+            text.align_x = align_x;
+            text.align_y = align_y;
+            frame.fill_text(text);
+        };
+
         // Draw background
         {
             let path = canvas::Path::rounded_rectangle(
-                Point::new(min_x.min(max_x), min_y.min(max_y)),
-                Size::new((max_x - min_x).abs(), (max_y - min_y).abs()),
-                radius_s.into(),
+                Point::new(min_x, min_y),
+                Size::new(max_x - min_x, max_y - min_y),
+                bg_radius.into(),
             );
             frame.fill(&path, bg_component_color)
         }
 
-        // Draw guidelines
-        for &time in &[50.0, 40.0, 30.0, 20.0, 10.0] {
+        // Draw X axis info
+        text(
+            "60 secs",
+            Point::new(calc_x(60.0), max_y),
+            Alignment::Left,
+            Vertical::Top,
+            &mut frame,
+        );
+        for &(time, string) in &[
+            (50.0, "50"),
+            (40.0, "40"),
+            (30.0, "30"),
+            (20.0, "20"),
+            (10.0, "10"),
+        ] {
             let x = calc_x(time);
             let path = canvas::Path::line(Point::new(x, min_y), Point::new(x, max_y));
             frame.stroke(
                 &path,
                 canvas::Stroke::default().with_color(accent_color_0_5),
             );
+
+            text(
+                string,
+                Point::new(x, max_y),
+                Alignment::Center,
+                Vertical::Top,
+                &mut frame,
+            );
         }
-        for &value in &[20.0, 40.0, 60.0, 80.0] {
+        text(
+            "0",
+            Point::new(calc_x(0.0), max_y),
+            Alignment::Right,
+            Vertical::Top,
+            &mut frame,
+        );
+
+        // Draw Y axis info
+        text(
+            "0%",
+            Point::new(max_x, calc_y(0.0)),
+            Alignment::Left,
+            Vertical::Bottom,
+            &mut frame,
+        );
+        for &(value, string) in &[(20.0, "20%"), (40.0, "40%"), (60.0, "60%"), (80.0, "80%")] {
             let y = calc_y(value);
             let path = canvas::Path::line(Point::new(min_x, y), Point::new(max_x, y));
             frame.stroke(
                 &path,
                 canvas::Stroke::default().with_color(accent_color_0_5),
             );
+
+            text(
+                string,
+                Point::new(max_x, y),
+                Alignment::Left,
+                Vertical::Center,
+                &mut frame,
+            );
         }
+        text(
+            "100%",
+            Point::new(max_x, calc_y(100.0)),
+            Alignment::Left,
+            Vertical::Top,
+            &mut frame,
+        );
 
         // Draw values
         let start = self
