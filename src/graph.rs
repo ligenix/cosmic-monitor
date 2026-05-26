@@ -170,13 +170,7 @@ impl<'a> canvas::Program<Message, Theme, Renderer> for Graph<'a> {
         for (i, graph_item) in self.history.iter().enumerate() {
             let x = calc_x(end.saturating_duration_since(graph_item.time).as_secs_f32());
             let value = match self.kind {
-                GraphKind::Cpu => {
-                    graph_item
-                        .cpus
-                        .iter()
-                        .fold(0.0, |total, x| total + x.cpu_usage)
-                        / (graph_item.cpus.len() as f32)
-                }
+                GraphKind::Cpu => graph_item.total_cpu_usage(),
                 GraphKind::Memory => {
                     100.0 * (graph_item.memory.used as f32) / (graph_item.memory.total as f32)
                 }

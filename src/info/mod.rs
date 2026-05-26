@@ -72,6 +72,14 @@ impl GraphItem {
             networks: network_items,
         }
     }
+
+    pub fn total_cpu_usage(&self) -> f32 {
+        let mut total = 0.0;
+        for cpu in self.cpus.iter() {
+            total += cpu.cpu_usage;
+        }
+        total / (self.cpus.len() as f32)
+    }
 }
 
 pub fn worker() -> impl Stream<Item = Message> {

@@ -5,12 +5,12 @@ use cosmic::{
     Application, Element,
     app::{Core, Settings, Task, context_drawer},
     cosmic_config::{self, CosmicConfigEntry},
-    executor,
+    cosmic_theme, executor,
     iced::{
         self, Alignment, Length, Limits, Subscription,
         core::text::{Ellipsize, EllipsizeHeightLimit, Shaping},
     },
-    surface,
+    surface, theme,
     widget::{
         self,
         about::About,
@@ -468,6 +468,13 @@ impl Application for App {
 
     /// Creates a view after each update.
     fn view(&self) -> Element<'_, Self::Message> {
+        let cosmic_theme::Spacing {
+            space_m,
+            space_s,
+            space_xs,
+            ..
+        } = theme::active().cosmic().spacing;
+
         let content: Element<Message> = match self
             .nav_model
             .active_data()
@@ -532,13 +539,15 @@ impl Application for App {
             }
             NavPage::CPU => {
                 if let Some(graph_item) = &self.graph_snapshot {
-                    let mut column = widget::column::with_capacity(graph_item.cpus.len() + 1)
+                    let mut column = widget::column::with_capacity(2)
+                        .spacing(space_m)
                         .width(Length::Fill);
                     column = column.push(
                         canvas(Graph::new(GraphKind::Cpu, &self.graph_history))
                             .height(300.0)
                             .width(Length::Fill),
                     );
+                    let mut children = Vec::with_capacity(graph_item.cpus.len());
                     for cpu in graph_item.cpus.iter() {
                         let mut row = widget::row::with_capacity(2).align_y(Alignment::Center);
                         row = row.push(
@@ -551,9 +560,14 @@ impl Application for App {
                                 .align_x(Alignment::End)
                                 .width(48.0),
                         );
-                        column = column.push(widget::text::heading(&cpu.name));
-                        column = column.push(row);
+                        children
+                            .push(widget::column!(widget::text::heading(&cpu.name), row).into());
                     }
+                    column = column.push(
+                        widget::flex_row(children)
+                            .column_spacing(space_s)
+                            .row_spacing(space_xs),
+                    );
                     column.into()
                 } else {
                     widget::indeterminate_circular().into()
