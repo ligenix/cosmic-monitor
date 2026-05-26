@@ -26,7 +26,7 @@ icu = { version = "2.1.1", features = ["compiled_data"] }
 rust-embed = "8"
 
 [target.'cfg(unix)'.dependencies]
-rustix = "1"
+rustix = { version = "1", features = ["process"] }
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
