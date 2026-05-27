@@ -7,8 +7,8 @@ use std::{
     time::{Duration, Instant},
 };
 use sysinfo::{
-    Components, CpuRefreshKind, Disks, MemoryRefreshKind, Networks, ProcessRefreshKind,
-    RefreshKind, System, UpdateKind, Users,
+    Components, CpuRefreshKind, Disks, InterfaceOperationalState, MemoryRefreshKind, Networks,
+    ProcessRefreshKind, RefreshKind, System, UpdateKind, Users,
 };
 use tokio::sync::mpsc;
 
@@ -63,6 +63,15 @@ impl GraphItem {
         for (name, data) in network_list.iter() {
             network_items.push(NetworkItem::new(name, data, refresh));
         }
+        network_items.sort_by(|a, b| {
+            let weight = |state| match state {
+                InterfaceOperationalState::Up => 0,
+                InterfaceOperationalState::Dormant => 1,
+                InterfaceOperationalState::Unknown => 2,
+                _ => 3,
+            };
+            weight(a.state).cmp(&weight(b.state))
+        });
 
         Self {
             time,
