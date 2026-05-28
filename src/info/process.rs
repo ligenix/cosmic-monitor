@@ -9,6 +9,8 @@ use cosmic::{
 };
 use sysinfo::{Pid, Process, Users};
 
+use super::Platform;
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
 pub enum ProcessCategory {
     #[default]
@@ -93,6 +95,8 @@ pub struct ProcessItem {
     pub disk_read_str: String,
     pub disk_write: u64,
     pub disk_write_str: String,
+    pub gpu_usage: Option<u32>,
+    pub gpu_usage_str: String,
     pub memory: u64,
     pub memory_str: String,
     pub name: String,
@@ -103,29 +107,12 @@ pub struct ProcessItem {
 }
 
 impl ProcessItem {
-    pub fn new(p: &Process, users: &Users, refresh: Duration) -> Self {
-        let username = match p.user_id() {
-            Some(uid) => match users.get_user_by_id(uid) {
-                Some(user) => user.name().to_string(),
-                None => uid.to_string(),
-            },
-            None => String::new(),
-        };
-
-        let mut priority = None;
-
-        #[cfg(unix)]
-        if let Some(pid) = rustix::process::Pid::from_raw(p.pid().as_u32() as _) {
-            match rustix::process::getpriority_process(Some(pid)) {
-                Ok(ok) => {
-                    priority = Some(ok);
-                }
-                Err(err) => {
-                    log::warn!("failed to get priority for {}: {}", p.pid(), err);
-                }
-            }
-        }
-
+    pub fn new(
+        p: &Process,
+        platform: &Box<dyn Platform>,
+        users: &Users,
+        refresh: Duration,
+    ) -> Self {
         let cpu_usage = (p.cpu_usage() * 10.0) as u32;
         let cpu_usage_str = format!("{}.{}%", cpu_usage / 10, cpu_usage % 10);
 
@@ -141,11 +128,41 @@ impl ProcessItem {
             humansize::format_size(disk_write, humansize::DECIMAL)
         );
 
+        let pid = p.pid();
+        let pid_str = pid.to_string();
+
+        let (gpu_usage, gpu_usage_str) = if let Some(usage) = platform.process_gpu_usage(pid) {
+            let gpu_usage = (usage * 10.0) as u32;
+            let gpu_usage_str = format!("{}.{}%", gpu_usage / 10, gpu_usage % 10);
+            (Some(gpu_usage), gpu_usage_str)
+        } else {
+            (None, String::new())
+        };
+
         let memory = p.memory();
         let memory_str = format!("{}", humansize::format_size(memory, humansize::BINARY));
 
-        let pid = p.pid();
-        let pid_str = pid.to_string();
+        let mut priority = None;
+
+        #[cfg(unix)]
+        if let Some(pid) = rustix::process::Pid::from_raw(p.pid().as_u32() as _) {
+            match rustix::process::getpriority_process(Some(pid)) {
+                Ok(ok) => {
+                    priority = Some(ok);
+                }
+                Err(err) => {
+                    log::warn!("failed to get priority for {}: {}", p.pid(), err);
+                }
+            }
+        }
+
+        let username = match p.user_id() {
+            Some(uid) => match users.get_user_by_id(uid) {
+                Some(user) => user.name().to_string(),
+                None => uid.to_string(),
+            },
+            None => String::new(),
+        };
 
         Self {
             cpu_usage,
@@ -154,6 +171,8 @@ impl ProcessItem {
             disk_read_str,
             disk_write,
             disk_write_str,
+            gpu_usage,
+            gpu_usage_str,
             memory,
             memory_str,
             name: p.name().to_string_lossy().into(),
@@ -172,6 +191,7 @@ impl ProcessItem {
             ProcessCategory::PID => &self.pid_str,
             ProcessCategory::CPU => &self.cpu_usage_str,
             ProcessCategory::Memory => &self.memory_str,
+            ProcessCategory::GPU => &self.gpu_usage_str,
             ProcessCategory::DiskRead => &self.disk_read_str,
             ProcessCategory::DiskWrite => &self.disk_write_str,
             //TODO: translate
@@ -188,8 +208,6 @@ impl ProcessItem {
                     "Very low"
                 }
             }),
-            //TODO
-            _ => "TODO",
         }
     }
 }
@@ -212,11 +230,10 @@ impl ItemInterface<ProcessCategory> for ProcessItem {
             // These are sorted with higher values at the top
             ProcessCategory::CPU => other.cpu_usage.cmp(&self.cpu_usage),
             ProcessCategory::Memory => other.memory.cmp(&self.memory),
+            ProcessCategory::GPU => other.gpu_usage.cmp(&self.gpu_usage),
             ProcessCategory::DiskRead => other.disk_read.cmp(&self.disk_read),
             ProcessCategory::DiskWrite => other.disk_write.cmp(&self.disk_write),
             ProcessCategory::Priority => self.priority.cmp(&other.priority),
-            //TODO
-            _ => self.pid.cmp(&other.pid),
         }
     }
 }

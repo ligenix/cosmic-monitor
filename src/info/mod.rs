@@ -26,6 +26,9 @@ pub use self::memory::*;
 mod network;
 pub use self::network::*;
 
+mod platform;
+pub use self::platform::*;
+
 mod process;
 pub use self::process::*;
 
@@ -150,6 +153,7 @@ pub fn worker() -> impl Stream<Item = Message> {
             let mut sys = System::new();
             let mut disks = Disks::new();
             let mut networks = Networks::new();
+            let mut platform = default_platform();
             loop {
                 let time = Instant::now();
                 sys.refresh_specifics(
@@ -166,6 +170,7 @@ pub fn worker() -> impl Stream<Item = Message> {
                 );
                 disks.refresh(true);
                 networks.refresh(true);
+                platform.refresh_processes();
 
                 let graph_item = GraphItem::new(time, &sys, &disks, &networks, processes_refresh);
 
@@ -176,7 +181,12 @@ pub fn worker() -> impl Stream<Item = Message> {
                     if process.thread_kind().is_some() {
                         continue;
                     }
-                    process_items.push(ProcessItem::new(process, &users, processes_refresh));
+                    process_items.push(ProcessItem::new(
+                        process,
+                        &platform,
+                        &users,
+                        processes_refresh,
+                    ));
                 }
 
                 match tx.blocking_send(Message::Snapshot(graph_item, process_items)) {
