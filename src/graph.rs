@@ -104,7 +104,14 @@ impl<'a> canvas::Program<Message, Theme, Renderer> for Graph<'a> {
                 10.0f32.powf(max.log10().ceil().max(3.0) as f32)
             }
         };
-        let calc_y = |value: f32| -> f32 { (1.0 - value / scale_y) * (bounds.height - 20.0) };
+
+        // NaN or +/- infinity would be nonsensical on a chart, so replace with zero
+        fn invalid_is_zero(value: f32) -> f32 {
+            if value.is_finite() { value } else { 0.0 }
+        }
+        let calc_y = |value: f32| -> f32 {
+            (1.0 - invalid_is_zero(value / scale_y)) * (bounds.height - 20.0)
+        };
 
         let min_x = calc_x(60.0);
         let max_x = calc_x(0.0);

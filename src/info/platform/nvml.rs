@@ -32,6 +32,11 @@ impl NvmlPlatform {
             let memory_info = device.memory_info()?;
             let util = device.utilization_rates()?;
             self.gpu_items.push(GpuItem {
+                bus_id: device
+                    .pci_info()
+                    // Normalize bus ID to match PCI IDs from Linux
+                    .map(|x| x.bus_id.replace("00000000:", "0000:"))
+                    .ok(),
                 name,
                 usage: util.gpu as f32,
                 vram_used: memory_info.used,
