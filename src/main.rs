@@ -172,6 +172,7 @@ pub enum NavPage {
     Processes,
     CPU,
     Memory,
+    Gpu,
     Disk,
     Network,
 }
@@ -182,6 +183,7 @@ impl NavPage {
             Self::Processes,
             Self::CPU,
             Self::Memory,
+            Self::Gpu,
             Self::Disk,
             Self::Network,
         ]
@@ -192,6 +194,7 @@ impl NavPage {
             Self::Processes => fl!("processes"),
             Self::CPU => fl!("cpu"),
             Self::Memory => fl!("memory"),
+            Self::Gpu => fl!("gpu"),
             Self::Disk => fl!("disk"),
             Self::Network => fl!("network"),
         }
@@ -682,6 +685,69 @@ impl Application for App {
                     );
                 } else {
                     column = column.push(widget::indeterminate_circular())
+                }
+
+                column.into()
+            }
+            NavPage::Gpu => {
+                let mut column = widget::column::with_capacity(3)
+                    .spacing(space_m)
+                    .width(Length::Fill);
+                column = column.push(widget::text::title2(nav_page.title()));
+
+                if let Some(graph_item) = &self.graph_snapshot {
+                    for gpu in graph_item.gpus.iter() {
+                        column = column.push(
+                            widget::column!(
+                                widget::text::title4(&gpu.name),
+                                widget::row!(widget::column!(
+                                    widget::text::body(fl!("utilization")),
+                                    widget::text::heading(format!("{:.1}%", gpu.usage))
+                                ),)
+                                .spacing(space_m),
+                                canvas(Graph::new(
+                                    GraphKind::GpuUsage(&gpu.name),
+                                    &self.graph_history
+                                ))
+                                .height(300.0)
+                                .width(Length::Fill),
+                                widget::row!(
+                                    widget::column!(
+                                        widget::text::body(fl!("capacity")),
+                                        widget::text::heading(
+                                            humansize::format_size(
+                                                gpu.vram_total,
+                                                humansize::BINARY
+                                            )
+                                            .to_string()
+                                        )
+                                    ),
+                                    widget::column!(
+                                        widget::text::body(fl!("vram")),
+                                        widget::text::heading(format!(
+                                            "{} ({:.1}%)",
+                                            humansize::format_size(
+                                                gpu.vram_used,
+                                                humansize::BINARY
+                                            ),
+                                            100.0 * (gpu.vram_used as f64)
+                                                / (gpu.vram_total as f64)
+                                        ))
+                                    ),
+                                )
+                                .spacing(space_m),
+                                canvas(Graph::new(
+                                    GraphKind::GpuVram(&gpu.name),
+                                    &self.graph_history
+                                ))
+                                .height(300.0)
+                                .width(Length::Fill),
+                            )
+                            .spacing(space_xxs),
+                        );
+                    }
+                } else {
+                    column = column.push(widget::indeterminate_circular());
                 }
 
                 column.into()

@@ -12,6 +12,8 @@ pub enum GraphKind<'a> {
     Cpu,
     Memory,
     Swap,
+    GpuUsage(&'a str),
+    GpuVram(&'a str),
     DiskRead(&'a str),
     DiskWrite(&'a str),
     NetworkRx(&'a str),
@@ -52,7 +54,11 @@ impl<'a> canvas::Program<Message, Theme, Renderer> for Graph<'a> {
 
         let calc_x = |time: f32| -> f32 { (1.0 - time / 60.0) * (bounds.width - 80.0) };
         let scale_y = match self.kind {
-            GraphKind::Cpu | GraphKind::Memory | GraphKind::Swap => 100.0,
+            GraphKind::Cpu
+            | GraphKind::Memory
+            | GraphKind::Swap
+            | GraphKind::GpuUsage(_)
+            | GraphKind::GpuVram(_) => 100.0,
             GraphKind::DiskRead(disk_name) => {
                 let mut max = 0.0;
                 for graph_item in self.history.iter() {
@@ -171,7 +177,11 @@ impl<'a> canvas::Program<Message, Theme, Renderer> for Graph<'a> {
 
         // Draw Y axis info
         match self.kind {
-            GraphKind::Cpu | GraphKind::Memory | GraphKind::Swap => {
+            GraphKind::Cpu
+            | GraphKind::Memory
+            | GraphKind::Swap
+            | GraphKind::GpuUsage(_)
+            | GraphKind::GpuVram(_) => {
                 text(
                     "0%",
                     Point::new(max_x, calc_y(0.0)),
@@ -275,6 +285,20 @@ impl<'a> canvas::Program<Message, Theme, Renderer> for Graph<'a> {
                 GraphKind::Swap => {
                     100.0 * (graph_item.memory.swap_used as f32)
                         / (graph_item.memory.swap_total as f32)
+                }
+                GraphKind::GpuUsage(gpu_name) => {
+                    let mut total = 0.0;
+                    for gpu in graph_item.gpus.iter().filter(|x| x.name == gpu_name) {
+                        total += gpu.usage as f32;
+                    }
+                    total
+                }
+                GraphKind::GpuVram(gpu_name) => {
+                    let mut total = 0.0;
+                    for gpu in graph_item.gpus.iter().filter(|x| x.name == gpu_name) {
+                        total += 100.0 * (gpu.vram_used as f32) / (gpu.vram_total as f32);
+                    }
+                    total
                 }
                 GraphKind::DiskRead(disk_name) => {
                     let mut total = 0.0;

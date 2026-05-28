@@ -20,6 +20,9 @@ pub use self::cpu::*;
 mod disk;
 pub use self::disk::*;
 
+mod gpu;
+pub use self::gpu::*;
+
 mod memory;
 pub use self::memory::*;
 
@@ -37,6 +40,7 @@ pub struct GraphItem {
     pub time: Instant,
     pub cpus: Vec<CpuItem>,
     pub disks: Vec<DiskItem>,
+    pub gpus: Vec<GpuItem>,
     pub memory: MemoryItem,
     pub networks: Vec<NetworkItem>,
 }
@@ -47,6 +51,7 @@ impl GraphItem {
         sys: &System,
         disks: &Disks,
         networks: &Networks,
+        platform: &Box<dyn Platform>,
         refresh: Duration,
     ) -> Self {
         let cpus = sys.cpus();
@@ -80,6 +85,7 @@ impl GraphItem {
             time,
             cpus: cpu_items,
             disks: disk_items,
+            gpus: platform.gpus(),
             memory: MemoryItem::new(&sys),
             networks: network_items,
         }
@@ -122,6 +128,7 @@ pub fn worker() -> impl Stream<Item = Message> {
                 let mut sys = System::new();
                 let mut disks = Disks::new();
                 let mut networks = Networks::new();
+                let mut platform = default_platform();
                 loop {
                     let time = Instant::now();
                     sys.refresh_specifics(
@@ -131,8 +138,10 @@ pub fn worker() -> impl Stream<Item = Message> {
                     );
                     disks.refresh(true);
                     networks.refresh(true);
+                    platform.refresh_gpus();
 
-                    let graph_item = GraphItem::new(time, &sys, &disks, &networks, graph_refresh);
+                    let graph_item =
+                        GraphItem::new(time, &sys, &disks, &networks, &platform, graph_refresh);
                     if ignore > 0 {
                         ignore -= 1;
                     } else {
@@ -170,9 +179,11 @@ pub fn worker() -> impl Stream<Item = Message> {
                 );
                 disks.refresh(true);
                 networks.refresh(true);
+                platform.refresh_gpus();
                 platform.refresh_processes();
 
-                let graph_item = GraphItem::new(time, &sys, &disks, &networks, processes_refresh);
+                let graph_item =
+                    GraphItem::new(time, &sys, &disks, &networks, &platform, processes_refresh);
 
                 let processes = sys.processes();
                 let mut process_items = Vec::with_capacity(processes.len());

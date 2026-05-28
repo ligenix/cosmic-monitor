@@ -7,7 +7,7 @@ use std::{
 };
 use sysinfo::Pid;
 
-use super::Platform;
+use super::{GpuItem, Platform};
 
 use fdinfo::FdInfo;
 mod fdinfo;
@@ -38,6 +38,7 @@ impl LinuxProcess {
         let mut fdinfos = FdInfo::for_proc_path(&self.proc_path);
         let duration = time.saturating_duration_since(self.time).as_secs_f32();
 
+        // Add DRM fdinfo GPU usage to NVML GPU usage
         self.gpu_usage = nvml.process_gpu_usage(self.pid);
         for (id, fdinfo) in fdinfos.iter_mut() {
             if let Some(last_fdinfo) = self.fdinfos.get(id) {
@@ -82,6 +83,14 @@ impl LinuxPlatform {
 }
 
 impl Platform for LinuxPlatform {
+    fn refresh_gpus(&mut self) {
+        self.nvml.refresh_gpus();
+    }
+
+    fn gpus(&self) -> Vec<GpuItem> {
+        self.nvml.gpus()
+    }
+
     fn refresh_processes(&mut self) {
         self.nvml.refresh_processes();
 

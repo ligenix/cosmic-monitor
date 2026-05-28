@@ -1,5 +1,7 @@
 use sysinfo::Pid;
 
+use super::GpuItem;
+
 #[cfg(target_os = "linux")]
 mod linux;
 
@@ -7,6 +9,12 @@ mod linux;
 mod nvml;
 
 pub trait Platform {
+    fn refresh_gpus(&mut self) {}
+
+    fn gpus(&self) -> Vec<GpuItem> {
+        Vec::new()
+    }
+
     fn refresh_processes(&mut self) {}
 
     fn process_gpu_usage(&self, _pid: Pid) -> Option<f32> {

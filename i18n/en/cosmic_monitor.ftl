@@ -6,6 +6,7 @@ keywords = Monitor;System;Process;CPU;Memory;Network;History;Usage;
 processes = Processes
 cpu = CPU
 memory = Memory
+gpu = GPU
 disk = Disk
 network = Network
 
@@ -23,6 +24,9 @@ in-use = In use
 memory-usage = Memory Usage
 swap-usage = Swap Usage
 total-utilization = Total utilization
+
+## GPU
+vram = VRAM
 
 # Context Pages
 

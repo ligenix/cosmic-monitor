@@ -10,6 +10,7 @@ use cosmic::{
 use sysinfo::{Pid, Process, Users};
 
 use super::Platform;
+use crate::fl;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
 pub enum ProcessCategory {
@@ -57,15 +58,15 @@ impl fmt::Display for ProcessCategory {
             f,
             "{}",
             match self {
-                Self::Name => "Name",
-                Self::User => "User",
-                Self::PID => "PID",
-                Self::CPU => "CPU",
-                Self::Memory => "Memory",
-                Self::GPU => "GPU",
-                Self::DiskRead => "Disk Read",
-                Self::DiskWrite => "Disk Write",
-                Self::Priority => "Priority",
+                Self::Name => "Name".to_string(),
+                Self::User => "User".to_string(),
+                Self::PID => "PID".to_string(),
+                Self::CPU => fl!("cpu"),
+                Self::Memory => fl!("memory"),
+                Self::GPU => fl!("gpu"),
+                Self::DiskRead => "Disk Read".to_string(),
+                Self::DiskWrite => "Disk Write".to_string(),
+                Self::Priority => "Priority".to_string(),
             }
         )
     }
