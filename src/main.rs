@@ -7,7 +7,7 @@ use cosmic::{
     cosmic_config::{self, CosmicConfigEntry},
     cosmic_theme, executor,
     iced::{
-        self, Alignment, Length, Limits, Subscription,
+        self, Alignment, Length, Limits, Size, Subscription,
         core::text::{Ellipsize, EllipsizeHeightLimit, Shaping},
     },
     surface, theme,
@@ -273,6 +273,225 @@ impl App {
 
         widget::settings::view_column(vec![appearance_section.into()]).into()
     }
+
+    fn view_dashboard<'a>(&'a self, graph_item: &'a GraphItem, size: Size) -> Element<'a, Message> {
+        let cosmic_theme::Spacing {
+            space_s,
+            space_xs,
+            space_xxs,
+            ..
+        } = theme::active().cosmic().spacing;
+
+        let card = |graph_kind,
+                    graph_left,
+                    graph_right,
+                    name,
+                    caption,
+                    process_category: Option<ProcessCategory>,
+                    nav_page: NavPage|
+         -> Element<Message> {
+            let mut column = widget::column::with_capacity(7)
+                .spacing(space_xxs)
+                .push(widget::row!(
+                    widget::text::body(graph_left).width(Length::Fill),
+                    widget::text::body(graph_right).width(Length::Fill),
+                ))
+                .push(widget::column!(
+                    widget::text::body(name),
+                    widget::text::caption(caption)
+                        .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1))),
+                ));
+
+            if let Some(sort_category) = process_category {
+                // The compare function is backwards, so this uses min_by
+                if let Some(process) = self
+                    .processes
+                    .iter()
+                    .min_by(|a, b| a.compare(b, sort_category))
+                {
+                    let mut row = widget::row::with_capacity(2).align_y(Alignment::Center);
+                    for &category in &[ProcessCategory::Name, sort_category] {
+                        row = row.push(
+                            widget::container(
+                                widget::text(process.text(category))
+                                    .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
+                                    .shaping(Shaping::Basic),
+                            )
+                            .align_x(category.data_align())
+                            .align_y(Alignment::Center)
+                            .width(category.width()),
+                        );
+                    }
+                    column = column
+                        .push(widget::divider::horizontal::default())
+                        .push(row)
+                        .push(widget::divider::horizontal::default());
+                }
+            } else if matches!(graph_kind, GraphKind::NetworkTotal) {
+                if let Some((name, io)) = graph_item
+                    .networks
+                    .iter()
+                    .map(|x| (x.name.as_str(), (x.rx + x.tx) as u64))
+                    .max_by(|a, b| a.1.cmp(&b.1))
+                {
+                    let mut row = widget::row::with_capacity(2).align_y(Alignment::Center);
+                    row = row
+                        .push(
+                            widget::container(
+                                widget::text(name)
+                                    .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
+                                    .shaping(Shaping::Basic),
+                            )
+                            .align_x(Alignment::Start)
+                            .align_y(Alignment::Center)
+                            .width(Length::Fill),
+                        )
+                        .push(
+                            widget::container(
+                                widget::text(format!(
+                                    "{}/s",
+                                    humansize::format_size(io, humansize::DECIMAL)
+                                ))
+                                .shaping(Shaping::Basic),
+                            )
+                            .align_x(Alignment::End)
+                            .align_y(Alignment::Center)
+                            .width(Length::Shrink),
+                        );
+                    column = column
+                        .push(widget::divider::horizontal::default())
+                        .push(row)
+                        .push(widget::divider::horizontal::default());
+                }
+            }
+
+            column = column.push(
+                widget::button::text(fl!("details"))
+                    .trailing_icon(widget::icon::from_name("go-next-symbolic"))
+                    .on_press(Message::NavPage(nav_page)),
+            );
+
+            widget::container(
+                widget::row!(
+                    canvas(Graph::new(graph_kind, &self.graph_history).border())
+                        .height(176.0)
+                        .width(Length::Fill),
+                    column
+                )
+                .spacing(space_xs),
+            )
+            .class(theme::Container::Card)
+            .padding(space_s)
+            .width(Length::Fill)
+            .into()
+        };
+
+        let mut items = Vec::with_capacity(4 + graph_item.gpus.len());
+        items.push(card(
+            GraphKind::Cpu,
+            format!("{:.1}%", graph_item.total_cpu_usage()),
+            String::new(),
+            fl!("cpu"),
+            graph_item
+                .cpus
+                .first()
+                .map(|x| x.brand.clone())
+                .unwrap_or_default(),
+            Some(ProcessCategory::CPU),
+            NavPage::Cpu,
+        ));
+
+        items.push(card(
+            GraphKind::Memory,
+            format!(
+                "{:.1}%",
+                100.0 * (graph_item.memory.used as f32) / (graph_item.memory.total as f32),
+            ),
+            format!(
+                "{}",
+                humansize::format_size(graph_item.memory.used, humansize::BINARY),
+            ),
+            fl!("memory"),
+            format!(
+                "{}",
+                humansize::format_size(graph_item.memory.total, humansize::BINARY),
+            ),
+            Some(ProcessCategory::Memory),
+            NavPage::Memory,
+        ));
+
+        let disk_io = graph_item.total_disk_io();
+        items.push(card(
+            GraphKind::DiskTotal,
+            format!(
+                "{}/s read",
+                humansize::format_size(disk_io.0 as u64, humansize::DECIMAL),
+            ),
+            format!(
+                "{}/s write",
+                humansize::format_size(disk_io.1 as u64, humansize::DECIMAL)
+            ),
+            fl!("disk"),
+            String::new(),
+            Some(ProcessCategory::DiskTotal),
+            NavPage::Disk,
+        ));
+
+        let network_io = graph_item.total_network_io();
+        items.push(card(
+            GraphKind::NetworkTotal,
+            format!(
+                "{}/s rx",
+                humansize::format_size(network_io.0 as u64, humansize::DECIMAL),
+            ),
+            format!(
+                "{}/s tx",
+                humansize::format_size(network_io.1 as u64, humansize::DECIMAL)
+            ),
+            fl!("network"),
+            String::new(),
+            None,
+            NavPage::Network,
+        ));
+
+        for gpu in graph_item.gpus.iter() {
+            let Some(usage) = gpu.usage else { continue };
+
+            items.push(card(
+                GraphKind::GpuUsage(gpu.id),
+                format!("{:.1}%", usage),
+                String::new(),
+                fl!("gpu"),
+                gpu.name.clone(),
+                //TODO: filter by GPU
+                Some(ProcessCategory::GPU(gpu.id)),
+                NavPage::Gpu,
+            ));
+        }
+
+        let max_width = 640;
+        let cols = ((size.width as usize) + max_width - 1) / max_width;
+        let mut column = widget::column::with_capacity(items.len() / cols).spacing(space_s);
+        let mut row = widget::row::with_capacity(cols).spacing(space_s);
+        let mut col = 0;
+        for item in items {
+            if col >= cols {
+                column = column.push(row);
+                row = widget::row::with_capacity(cols).spacing(space_s);
+                col = 0;
+            }
+            row = row.push(item);
+            col += 1;
+        }
+        if col > 0 {
+            while col < cols {
+                row = row.push(widget::space().width(Length::Fill));
+                col += 1;
+            }
+            column = column.push(row);
+        }
+        column.into()
+    }
 }
 
 /// Implement [`Application`] to integrate with COSMIC.
@@ -513,195 +732,9 @@ impl Application for App {
             .push(widget::space().height(space_m));
         let content: Element<Message> = match (nav_page, &self.graph_snapshot) {
             (NavPage::Dashboard, Some(graph_item)) => {
-                let card = |graph_kind,
-                            graph_left,
-                            graph_right,
-                            name,
-                            caption,
-                            process_category: Option<ProcessCategory>,
-                            nav_page: NavPage|
-                 -> Element<Message> {
-                    let mut column = widget::column::with_capacity(7)
-                        .spacing(space_xxs)
-                        .push(
-                            canvas(Graph::new(graph_kind, &self.graph_history).border())
-                                .height(176.0)
-                                .width(Length::Fill),
-                        )
-                        .push(widget::row!(
-                            widget::text::body(graph_left).width(Length::Fill),
-                            widget::text::body(graph_right).width(Length::Fill),
-                        ))
-                        .push(widget::column!(
-                            widget::text::body(name),
-                            widget::text::caption(caption)
-                                .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1))),
-                        ));
-
-                    if let Some(sort_category) = process_category {
-                        // The compare function is backwards, so this uses min_by
-                        if let Some(process) = self
-                            .processes
-                            .iter()
-                            .min_by(|a, b| a.compare(b, sort_category))
-                        {
-                            let mut row = widget::row::with_capacity(2).align_y(Alignment::Center);
-                            for &category in &[ProcessCategory::Name, sort_category] {
-                                row = row.push(
-                                    widget::container(
-                                        widget::text(process.text(category))
-                                            .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(
-                                                1,
-                                            )))
-                                            .shaping(Shaping::Basic),
-                                    )
-                                    .align_x(category.data_align())
-                                    .align_y(Alignment::Center)
-                                    .width(category.width()),
-                                );
-                            }
-                            column = column
-                                .push(widget::divider::horizontal::default())
-                                .push(row)
-                                .push(widget::divider::horizontal::default());
-                        }
-                    } else if matches!(graph_kind, GraphKind::NetworkTotal) {
-                        if let Some((name, io)) = graph_item
-                            .networks
-                            .iter()
-                            .map(|x| (x.name.as_str(), (x.rx + x.tx) as u64))
-                            .max_by(|a, b| a.1.cmp(&b.1))
-                        {
-                            let mut row = widget::row::with_capacity(2).align_y(Alignment::Center);
-                            row = row
-                                .push(
-                                    widget::container(
-                                        widget::text(name)
-                                            .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(
-                                                1,
-                                            )))
-                                            .shaping(Shaping::Basic),
-                                    )
-                                    .align_x(Alignment::Start)
-                                    .align_y(Alignment::Center)
-                                    .width(Length::Fill),
-                                )
-                                .push(
-                                    widget::container(
-                                        widget::text(format!(
-                                            "{}/s",
-                                            humansize::format_size(io, humansize::DECIMAL)
-                                        ))
-                                        .shaping(Shaping::Basic),
-                                    )
-                                    .align_x(Alignment::End)
-                                    .align_y(Alignment::Center)
-                                    .width(Length::Shrink),
-                                );
-                            column = column
-                                .push(widget::divider::horizontal::default())
-                                .push(row)
-                                .push(widget::divider::horizontal::default());
-                        }
-                    }
-
-                    column = column.push(
-                        widget::button::text(fl!("details"))
-                            .trailing_icon(widget::icon::from_name("go-next-symbolic"))
-                            .on_press(Message::NavPage(nav_page)),
-                    );
-
-                    widget::container(column)
-                        .class(theme::Container::Card)
-                        .padding(space_s)
-                        .width(300.0)
-                        .into()
-                };
-
-                let mut flex_row = Vec::with_capacity(2 + graph_item.gpus.len());
-                flex_row.push(card(
-                    GraphKind::Cpu,
-                    format!("{:.1}%", graph_item.total_cpu_usage()),
-                    String::new(),
-                    fl!("cpu"),
-                    graph_item
-                        .cpus
-                        .first()
-                        .map(|x| x.brand.clone())
-                        .unwrap_or_default(),
-                    Some(ProcessCategory::CPU),
-                    NavPage::Cpu,
-                ));
-
-                flex_row.push(card(
-                    GraphKind::Memory,
-                    format!(
-                        "{:.1}%",
-                        100.0 * (graph_item.memory.used as f32) / (graph_item.memory.total as f32),
-                    ),
-                    format!(
-                        "{}",
-                        humansize::format_size(graph_item.memory.used, humansize::BINARY),
-                    ),
-                    fl!("memory"),
-                    format!(
-                        "{}",
-                        humansize::format_size(graph_item.memory.total, humansize::BINARY),
-                    ),
-                    Some(ProcessCategory::Memory),
-                    NavPage::Memory,
-                ));
-
-                let disk_io = graph_item.total_disk_io();
-                flex_row.push(card(
-                    GraphKind::DiskTotal,
-                    format!(
-                        "{}/s read",
-                        humansize::format_size(disk_io.0 as u64, humansize::DECIMAL),
-                    ),
-                    format!(
-                        "{}/s write",
-                        humansize::format_size(disk_io.1 as u64, humansize::DECIMAL)
-                    ),
-                    fl!("disk"),
-                    String::new(),
-                    Some(ProcessCategory::DiskTotal),
-                    NavPage::Disk,
-                ));
-
-                let network_io = graph_item.total_network_io();
-                flex_row.push(card(
-                    GraphKind::NetworkTotal,
-                    format!(
-                        "{}/s rx",
-                        humansize::format_size(network_io.0 as u64, humansize::DECIMAL),
-                    ),
-                    format!(
-                        "{}/s tx",
-                        humansize::format_size(network_io.1 as u64, humansize::DECIMAL)
-                    ),
-                    fl!("network"),
-                    String::new(),
-                    None,
-                    NavPage::Network,
-                ));
-
-                for gpu in graph_item.gpus.iter() {
-                    let Some(usage) = gpu.usage else { continue };
-
-                    flex_row.push(card(
-                        GraphKind::GpuUsage(gpu.id),
-                        format!("{:.1}%", usage),
-                        String::new(),
-                        fl!("gpu"),
-                        gpu.name.clone(),
-                        //TODO: filter by GPU
-                        Some(ProcessCategory::GPU(gpu.id)),
-                        NavPage::Gpu,
-                    ));
-                }
-
-                widget::flex_row(flex_row).spacing(space_xxs).into()
+                widget::responsive(|size| self.view_dashboard(graph_item, size))
+                    .width(Length::Fill)
+                    .into()
             }
             (NavPage::Processes, _) => {
                 //TODO: table is too slow, this uses list to emulate table
