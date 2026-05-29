@@ -506,32 +506,66 @@ impl Application for App {
                             graph_right,
                             name,
                             caption,
+                            process_category: Option<ProcessCategory>,
                             nav_page: NavPage|
                  -> Element<Message> {
-                    widget::container(
-                        widget::column!(
+                    let mut column = widget::column::with_capacity(7)
+                        .spacing(space_xxs)
+                        .push(
                             canvas(Graph::new(graph_kind, &self.graph_history).border())
                                 .height(176.0)
                                 .width(Length::Fill),
-                            widget::row!(
-                                widget::text::body(graph_left).width(Length::Fill),
-                                widget::text::body(graph_right).width(Length::Fill),
-                            ),
-                            widget::column!(
-                                widget::text::body(name),
-                                widget::text::caption(caption)
-                                    .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1))),
-                            ),
-                            widget::button::text(fl!("details"))
-                                .trailing_icon(widget::icon::from_name("go-next-symbolic"))
-                                .on_press(Message::NavPage(nav_page))
                         )
-                        .spacing(space_xxs),
-                    )
-                    .class(theme::Container::Card)
-                    .padding([space_xxs, space_s])
-                    .width(300.0)
-                    .into()
+                        .push(widget::row!(
+                            widget::text::body(graph_left).width(Length::Fill),
+                            widget::text::body(graph_right).width(Length::Fill),
+                        ))
+                        .push(widget::column!(
+                            widget::text::body(name),
+                            widget::text::caption(caption)
+                                .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1))),
+                        ));
+
+                    if let Some(sort_category) = process_category {
+                        // The compare function is backwards, so this uses min_by
+                        if let Some(process) = self
+                            .processes
+                            .iter()
+                            .min_by(|a, b| a.compare(b, sort_category))
+                        {
+                            let mut row = widget::row::with_capacity(2).align_y(Alignment::Center);
+                            for &category in &[ProcessCategory::Name, sort_category] {
+                                row = row.push(
+                                    widget::container(
+                                        widget::text(process.text(category))
+                                            .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(
+                                                1,
+                                            )))
+                                            .shaping(Shaping::Basic),
+                                    )
+                                    .align_x(category.data_align())
+                                    .align_y(Alignment::Center)
+                                    .width(category.width()),
+                                );
+                            }
+                            column = column
+                                .push(widget::divider::horizontal::default())
+                                .push(row)
+                                .push(widget::divider::horizontal::default());
+                        }
+                    }
+
+                    column = column.push(
+                        widget::button::text(fl!("details"))
+                            .trailing_icon(widget::icon::from_name("go-next-symbolic"))
+                            .on_press(Message::NavPage(nav_page)),
+                    );
+
+                    widget::container(column)
+                        .class(theme::Container::Card)
+                        .padding([space_xxs, space_s])
+                        .width(300.0)
+                        .into()
                 };
 
                 let mut flex_row = Vec::with_capacity(2 + graph_item.gpus.len());
@@ -545,6 +579,7 @@ impl Application for App {
                         .first()
                         .map(|x| x.brand.clone())
                         .unwrap_or_default(),
+                    Some(ProcessCategory::CPU),
                     NavPage::Cpu,
                 ));
 
@@ -563,7 +598,8 @@ impl Application for App {
                         "{}",
                         humansize::format_size(graph_item.memory.total, humansize::BINARY),
                     ),
-                    NavPage::Gpu,
+                    Some(ProcessCategory::Memory),
+                    NavPage::Memory,
                 ));
 
                 let disk_io = graph_item.total_disk_io();
@@ -579,6 +615,7 @@ impl Application for App {
                     ),
                     fl!("disk"),
                     String::new(),
+                    Some(ProcessCategory::DiskTotal),
                     NavPage::Disk,
                 ));
 
@@ -595,6 +632,7 @@ impl Application for App {
                     ),
                     fl!("network"),
                     String::new(),
+                    None,
                     NavPage::Network,
                 ));
 
@@ -607,6 +645,8 @@ impl Application for App {
                         String::new(),
                         fl!("gpu"),
                         gpu.name.clone(),
+                        //TODO: filter by GPU
+                        Some(ProcessCategory::GPU),
                         NavPage::Gpu,
                     ));
                 }

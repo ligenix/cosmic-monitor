@@ -23,6 +23,7 @@ pub enum ProcessCategory {
     GPU,
     DiskRead,
     DiskWrite,
+    DiskTotal,
     Priority,
 }
 
@@ -37,6 +38,7 @@ impl ProcessCategory {
             Self::GPU,
             Self::DiskRead,
             Self::DiskWrite,
+            //TODO: Self::DiskTotal,
             Self::Priority,
         ]
     }
@@ -44,9 +46,13 @@ impl ProcessCategory {
     pub fn data_align(&self) -> Alignment {
         match self {
             Self::Name | Self::User | Self::Priority => Alignment::Start,
-            Self::PID | Self::CPU | Self::Memory | Self::GPU | Self::DiskRead | Self::DiskWrite => {
-                Alignment::End
-            }
+            Self::PID
+            | Self::CPU
+            | Self::Memory
+            | Self::GPU
+            | Self::DiskRead
+            | Self::DiskWrite
+            | Self::DiskTotal => Alignment::End,
         }
     }
 }
@@ -66,6 +72,7 @@ impl fmt::Display for ProcessCategory {
                 Self::GPU => fl!("gpu"),
                 Self::DiskRead => "Disk Read".to_string(),
                 Self::DiskWrite => "Disk Write".to_string(),
+                Self::DiskTotal => "Disk Total".to_string(),
                 Self::Priority => "Priority".to_string(),
             }
         )
@@ -83,6 +90,7 @@ impl ItemCategory for ProcessCategory {
             Self::GPU => Length::Fixed(64.0),
             Self::DiskRead => Length::Fixed(96.0),
             Self::DiskWrite => Length::Fixed(96.0),
+            Self::DiskTotal => Length::Fixed(96.0),
             Self::Priority => Length::Fixed(96.0),
         }
     }
@@ -96,6 +104,8 @@ pub struct ProcessItem {
     pub disk_read_str: String,
     pub disk_write: u64,
     pub disk_write_str: String,
+    pub disk_total: u64,
+    pub disk_total_str: String,
     pub gpu_usage: Option<u32>,
     pub gpu_usage_str: String,
     pub memory: u64,
@@ -127,6 +137,11 @@ impl ProcessItem {
         let disk_write_str = format!(
             "{}/s",
             humansize::format_size(disk_write, humansize::DECIMAL)
+        );
+        let disk_total = disk_read + disk_write;
+        let disk_total_str = format!(
+            "{}/s",
+            humansize::format_size(disk_total, humansize::DECIMAL)
         );
 
         let pid = p.pid();
@@ -172,6 +187,8 @@ impl ProcessItem {
             disk_read_str,
             disk_write,
             disk_write_str,
+            disk_total,
+            disk_total_str,
             gpu_usage,
             gpu_usage_str,
             memory,
@@ -195,6 +212,7 @@ impl ProcessItem {
             ProcessCategory::GPU => &self.gpu_usage_str,
             ProcessCategory::DiskRead => &self.disk_read_str,
             ProcessCategory::DiskWrite => &self.disk_write_str,
+            ProcessCategory::DiskTotal => &self.disk_total_str,
             //TODO: translate
             ProcessCategory::Priority => self.priority.map_or("N/A", |x| {
                 if x < -7 {
@@ -234,6 +252,7 @@ impl ItemInterface<ProcessCategory> for ProcessItem {
             ProcessCategory::GPU => other.gpu_usage.cmp(&self.gpu_usage),
             ProcessCategory::DiskRead => other.disk_read.cmp(&self.disk_read),
             ProcessCategory::DiskWrite => other.disk_write.cmp(&self.disk_write),
+            ProcessCategory::DiskTotal => other.disk_total.cmp(&self.disk_total),
             ProcessCategory::Priority => self.priority.cmp(&other.priority),
         }
     }
