@@ -7,14 +7,14 @@ use std::{
 };
 use sysinfo::Pid;
 
-use super::{GpuItem, Platform};
+use super::{GpuId, GpuItem, Platform};
 
 use fdinfo::FdInfo;
 mod fdinfo;
 
 struct LinuxProcess {
     fdinfos: HashMap<(c_uint, c_uint), FdInfo>,
-    gpu_usage: Option<f32>,
+    gpu_usages: HashMap<GpuId, f32>,
     pid: Pid,
     proc_path: PathBuf,
     time: Instant,
@@ -25,7 +25,7 @@ impl LinuxProcess {
     fn new(pid: Pid, proc_path: PathBuf) -> Self {
         Self {
             fdinfos: HashMap::new(),
-            gpu_usage: None,
+            gpu_usages: HashMap::new(),
             pid,
             proc_path,
             time: Instant::now(),
@@ -39,7 +39,7 @@ impl LinuxProcess {
         let duration = time.saturating_duration_since(self.time).as_secs_f32();
 
         // Add DRM fdinfo GPU usage to NVML GPU usage
-        self.gpu_usage = nvml.process_gpu_usage(self.pid);
+        self.gpu_usages = nvml.process_gpu_usage(self.pid);
         for (id, fdinfo) in fdinfos.iter_mut() {
             if let Some(last_fdinfo) = self.fdinfos.get(id) {
                 for (name, nanos, usage) in fdinfo.engines.iter_mut() {
@@ -50,7 +50,7 @@ impl LinuxProcess {
                                     .as_secs_f32()
                                 / duration;
                             //TODO: filter by engine name
-                            self.gpu_usage = Some(self.gpu_usage.map_or(*usage, |x| x + *usage));
+                            *self.gpu_usages.entry(fdinfo.gpu_id).or_insert(0.0) += *usage;
                         }
                     }
                 }
@@ -127,10 +127,12 @@ impl Platform for LinuxPlatform {
                 let drm_path = entry.path();
                 let device_path = drm_path.join("device");
 
-                let mut bus_id_opt = None;
+                let mut id_opt = None;
                 if let Ok(link_path) = fs::read_link(&device_path) {
                     if let Some(link_name) = link_path.file_name() {
-                        bus_id_opt = Some(link_name.to_string_lossy().into());
+                        if let Some(link_str) = link_name.to_str() {
+                            id_opt = GpuId::parse_pci(link_str);
+                        }
                     }
                 }
 
@@ -167,7 +169,7 @@ impl Platform for LinuxPlatform {
                 };
 
                 let mut gpu_item = GpuItem {
-                    bus_id: bus_id_opt.unwrap_or_else(|| format!("card{}", id)),
+                    id: id_opt.unwrap_or(GpuId::Other(id)),
                     name,
                     usage: None,
                     vram_used: None,
@@ -194,8 +196,12 @@ impl Platform for LinuxPlatform {
 
         'nvml_gpus: for nvml_gpu in self.nvml.gpus() {
             for gpu in self.gpu_items.iter_mut() {
-                if gpu.bus_id == nvml_gpu.bus_id {
-                    *gpu = nvml_gpu;
+                if gpu.id == nvml_gpu.id {
+                    // Copy fields that NVML will know better than DRM
+                    gpu.name = nvml_gpu.name;
+                    gpu.usage = nvml_gpu.usage;
+                    gpu.vram_used = nvml_gpu.vram_used;
+                    gpu.vram_total = nvml_gpu.vram_total;
                     continue 'nvml_gpus;
                 }
             }
@@ -206,13 +212,8 @@ impl Platform for LinuxPlatform {
         for gpu_item in self.gpu_items.iter_mut() {
             if gpu_item.usage.is_none() {
                 for (_pid, process) in self.processes.iter() {
-                    for (_id, fdinfo) in process.fdinfos.iter() {
-                        if fdinfo.pdev.as_ref() == Some(&gpu_item.bus_id) {
-                            for (_, _, usage) in fdinfo.engines.iter() {
-                                gpu_item.usage =
-                                    Some(gpu_item.usage.map_or(*usage, |x| x + *usage));
-                            }
-                        }
+                    if let Some(usage) = process.gpu_usages.get(&gpu_item.id) {
+                        gpu_item.usage = Some(gpu_item.usage.map_or(*usage, |x| x + *usage));
                     }
                 }
             }
@@ -223,7 +224,11 @@ impl Platform for LinuxPlatform {
         self.gpu_items.clone()
     }
 
-    fn process_gpu_usage(&self, pid: Pid) -> Option<f32> {
-        self.processes.get(&pid)?.gpu_usage
+    fn process_gpu_usage(&self, pid: Pid) -> HashMap<GpuId, f32> {
+        if let Some(process) = self.processes.get(&pid) {
+            process.gpu_usages.clone()
+        } else {
+            HashMap::new()
+        }
     }
 }

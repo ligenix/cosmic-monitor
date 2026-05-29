@@ -5,16 +5,18 @@ use cosmic::{
 };
 use std::{collections::VecDeque, time::Instant};
 
-use super::{Message, info::GraphItem};
+use super::{
+    Message,
+    info::{GpuId, GraphItem},
+};
 
 #[derive(Clone, Copy, Debug)]
 pub enum GraphKind<'a> {
     Cpu,
     Memory,
     Swap,
-    //TODO: GPU name may not be unique, use bus_id or something else
-    GpuUsage(&'a str),
-    GpuVram(&'a str),
+    GpuUsage(GpuId),
+    GpuVram(GpuId),
     DiskRead(&'a str),
     DiskWrite(&'a str),
     DiskTotal,
@@ -346,16 +348,16 @@ impl<'a> canvas::Program<Message, Theme, Renderer> for Graph<'a> {
                     100.0 * (graph_item.memory.swap_used as f32)
                         / (graph_item.memory.swap_total as f32)
                 }
-                GraphKind::GpuUsage(gpu_bus_id) => {
+                GraphKind::GpuUsage(gpu_id) => {
                     let mut total = 0.0;
-                    for gpu in graph_item.gpus.iter().filter(|x| x.bus_id == gpu_bus_id) {
+                    for gpu in graph_item.gpus.iter().filter(|x| x.id == gpu_id) {
                         total += gpu.usage.unwrap_or_default();
                     }
                     total
                 }
-                GraphKind::GpuVram(gpu_bus_id) => {
+                GraphKind::GpuVram(gpu_id) => {
                     let mut total = 0.0;
-                    for gpu in graph_item.gpus.iter().filter(|x| x.bus_id == gpu_bus_id) {
+                    for gpu in graph_item.gpus.iter().filter(|x| x.id == gpu_id) {
                         total += 100.0 * (gpu.vram_used.unwrap_or_default() as f32)
                             / (gpu.vram_total.unwrap_or_default() as f32);
                     }

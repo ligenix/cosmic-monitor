@@ -1,9 +1,11 @@
 use libc::c_uint;
 use std::{collections::HashMap, fs, os::linux::fs::MetadataExt, path::Path};
 
+use super::GpuId;
+
 pub struct FdInfo {
     pub client_id: c_uint,
-    pub pdev: Option<String>,
+    pub gpu_id: GpuId,
     pub engines: Vec<(String, u64, f32)>,
     pub totals: Vec<(String, u64)>,
 }
@@ -41,7 +43,7 @@ impl FdInfo {
 
     pub fn new(data: &str) -> Option<Self> {
         let mut client_id = None;
-        let mut pdev = None;
+        let mut gpu_id = None;
         let mut totals = Vec::new();
         let mut engines = Vec::new();
         for line in data.lines() {
@@ -54,7 +56,7 @@ impl FdInfo {
                 if key == "client-id" {
                     client_id = value.parse().ok();
                 } else if key == "pdev" {
-                    pdev = Some(value.to_string());
+                    gpu_id = GpuId::parse_pci(value);
                 } else if let Some(key) = key.strip_prefix("engine-") {
                     if key.starts_with("capacity-") {
                         continue;
@@ -97,9 +99,10 @@ impl FdInfo {
             }
         }
 
+        //TODO: are client-id and pdev always set?
         Some(Self {
             client_id: client_id?,
-            pdev,
+            gpu_id: gpu_id?,
             engines,
             totals,
         })

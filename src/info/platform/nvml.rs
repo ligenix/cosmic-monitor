@@ -1,13 +1,13 @@
-use nvml_wrapper::{Nvml, error::NvmlError, struct_wrappers::device::ProcessUtilizationSample};
+use nvml_wrapper::{Nvml, error::NvmlError};
 use std::collections::HashMap;
 use sysinfo::Pid;
 
-use super::{GpuItem, Platform};
+use super::{GpuId, GpuItem, Platform};
 
 pub struct NvmlPlatform {
     gpu_items: Vec<GpuItem>,
     nvml: Option<Nvml>,
-    processes: HashMap<Pid, HashMap<u32, ProcessUtilizationSample>>,
+    processes: HashMap<Pid, HashMap<GpuId, f32>>,
 }
 
 impl NvmlPlatform {
@@ -37,11 +37,17 @@ impl NvmlPlatform {
             let name = device.name()?;
             let memory_info = device.memory_info()?;
             let pci_info = device.pci_info()?;
+            let gpu_id = GpuId::Pci {
+                domain: pci_info.domain,
+                bus: pci_info.bus,
+                device: pci_info.device,
+                //TODO: would this ever be non-zero?
+                func: 0,
+            };
             let util = device.utilization_rates()?;
 
             self.gpu_items.push(GpuItem {
-                // Normalize bus ID to match PCI IDs from Linux
-                bus_id: pci_info.bus_id.replace("00000000:", "0000:"),
+                id: gpu_id,
                 name,
                 usage: Some(util.gpu as f32),
                 vram_used: Some(memory_info.used),
@@ -52,10 +58,13 @@ impl NvmlPlatform {
                 //TODO: last_seen_timestamp
                 for sample in device.process_utilization_stats(None)? {
                     let pid = Pid::from_u32(sample.pid);
-                    self.processes
+                    //TODO: use more sample information?
+                    *self
+                        .processes
                         .entry(pid)
                         .or_insert_with(|| HashMap::new())
-                        .insert(index, sample);
+                        .entry(gpu_id)
+                        .or_insert(0.0) += sample.sm_util as f32;
                 }
             }
         }
@@ -74,13 +83,12 @@ impl Platform for NvmlPlatform {
         self.gpu_items.clone()
     }
 
-    fn process_gpu_usage(&self, pid: Pid) -> Option<f32> {
-        let samples = self.processes.get(&pid)?;
-        //TODO: use more sample information, show each GPU independently
-        Some(
-            samples
-                .iter()
-                .fold(0.0, |total, (_index, sample)| total + sample.sm_util as f32),
-        )
+    fn process_gpu_usage(&self, pid: Pid) -> HashMap<GpuId, f32> {
+        if let Some(usages) = self.processes.get(&pid) {
+            //TODO: use more sample information?
+            usages.clone()
+        } else {
+            HashMap::new()
+        }
     }
 }

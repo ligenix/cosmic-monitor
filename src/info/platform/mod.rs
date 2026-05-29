@@ -1,6 +1,7 @@
+use std::collections::HashMap;
 use sysinfo::Pid;
 
-use super::GpuItem;
+use super::{GpuId, GpuItem};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -15,8 +16,8 @@ pub trait Platform: Send + Sync {
         Vec::new()
     }
 
-    fn process_gpu_usage(&self, _pid: Pid) -> Option<f32> {
-        None
+    fn process_gpu_usage(&self, _pid: Pid) -> HashMap<GpuId, f32> {
+        HashMap::new()
     }
 }
 

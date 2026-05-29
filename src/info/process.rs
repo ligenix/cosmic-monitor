@@ -1,4 +1,4 @@
-use std::{borrow::Cow, cmp::Ordering, fmt, time::Duration};
+use std::{borrow::Cow, cmp::Ordering, collections::HashMap, fmt, time::Duration};
 
 use cosmic::{
     iced::{Alignment, Length},
@@ -9,7 +9,7 @@ use cosmic::{
 };
 use sysinfo::{Pid, Process, Users};
 
-use super::Platform;
+use super::{GpuId, Platform};
 use crate::fl;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
@@ -20,7 +20,8 @@ pub enum ProcessCategory {
     PID,
     CPU,
     Memory,
-    GPU,
+    GPU(GpuId),
+    GPUTotal,
     DiskRead,
     DiskWrite,
     DiskTotal,
@@ -35,7 +36,7 @@ impl ProcessCategory {
             Self::PID,
             Self::CPU,
             Self::Memory,
-            Self::GPU,
+            Self::GPUTotal,
             Self::DiskRead,
             Self::DiskWrite,
             //TODO: Self::DiskTotal,
@@ -49,7 +50,8 @@ impl ProcessCategory {
             Self::PID
             | Self::CPU
             | Self::Memory
-            | Self::GPU
+            | Self::GPU(_)
+            | Self::GPUTotal
             | Self::DiskRead
             | Self::DiskWrite
             | Self::DiskTotal => Alignment::End,
@@ -69,7 +71,8 @@ impl fmt::Display for ProcessCategory {
                 Self::PID => "PID".to_string(),
                 Self::CPU => fl!("cpu"),
                 Self::Memory => fl!("memory"),
-                Self::GPU => fl!("gpu"),
+                Self::GPU(gpu_id) => format!("GPU {:?}", gpu_id),
+                Self::GPUTotal => fl!("gpu"),
                 Self::DiskRead => "Disk Read".to_string(),
                 Self::DiskWrite => "Disk Write".to_string(),
                 Self::DiskTotal => "Disk Total".to_string(),
@@ -87,10 +90,8 @@ impl ItemCategory for ProcessCategory {
             Self::PID => Length::Fixed(96.0),
             Self::CPU => Length::Fixed(64.0),
             Self::Memory => Length::Fixed(96.0),
-            Self::GPU => Length::Fixed(64.0),
-            Self::DiskRead => Length::Fixed(96.0),
-            Self::DiskWrite => Length::Fixed(96.0),
-            Self::DiskTotal => Length::Fixed(96.0),
+            Self::GPU(_) | Self::GPUTotal => Length::Fixed(64.0),
+            Self::DiskRead | Self::DiskWrite | Self::DiskTotal => Length::Fixed(96.0),
             Self::Priority => Length::Fixed(96.0),
         }
     }
@@ -106,8 +107,9 @@ pub struct ProcessItem {
     pub disk_write_str: String,
     pub disk_total: u64,
     pub disk_total_str: String,
-    pub gpu_usage: Option<u32>,
-    pub gpu_usage_str: String,
+    pub gpu_usages: HashMap<GpuId, (u32, String)>,
+    pub gpu_total_usage: Option<u32>,
+    pub gpu_total_usage_str: String,
     pub memory: u64,
     pub memory_str: String,
     pub name: String,
@@ -148,13 +150,17 @@ impl ProcessItem {
         let pid = p.pid();
         let pid_str = pid.to_string();
 
-        let (gpu_usage, gpu_usage_str) = if let Some(usage) = platform.process_gpu_usage(pid) {
+        let mut gpu_total_usage = None;
+        let mut gpu_usages = HashMap::new();
+        for (gpu_id, usage) in platform.process_gpu_usage(pid) {
             let gpu_usage = (usage * 10.0) as u32;
             let gpu_usage_str = format!("{}.{}%", gpu_usage / 10, gpu_usage % 10);
-            (Some(gpu_usage), gpu_usage_str)
-        } else {
-            (None, String::new())
-        };
+            gpu_total_usage = Some(gpu_total_usage.map_or(gpu_usage, |x| x + gpu_usage));
+            gpu_usages.insert(gpu_id, (gpu_usage, gpu_usage_str));
+        }
+        let gpu_total_usage_str = gpu_total_usage
+            .map(|x| format!("{}.{}%", x / 10, x % 10))
+            .unwrap_or_default();
 
         let memory = p.memory();
         let memory_str = format!("{}", humansize::format_size(memory, humansize::BINARY));
@@ -190,8 +196,9 @@ impl ProcessItem {
             disk_write_str,
             disk_total,
             disk_total_str,
-            gpu_usage,
-            gpu_usage_str,
+            gpu_usages,
+            gpu_total_usage,
+            gpu_total_usage_str,
             memory,
             memory_str,
             name: p.name().to_string_lossy().into(),
@@ -210,7 +217,12 @@ impl ProcessItem {
             ProcessCategory::PID => &self.pid_str,
             ProcessCategory::CPU => &self.cpu_usage_str,
             ProcessCategory::Memory => &self.memory_str,
-            ProcessCategory::GPU => &self.gpu_usage_str,
+            ProcessCategory::GPU(gpu_id) => &self
+                .gpu_usages
+                .get(&gpu_id)
+                .map(|x| x.1.as_str())
+                .unwrap_or_default(),
+            ProcessCategory::GPUTotal => &self.gpu_total_usage_str,
             ProcessCategory::DiskRead => &self.disk_read_str,
             ProcessCategory::DiskWrite => &self.disk_write_str,
             ProcessCategory::DiskTotal => &self.disk_total_str,
@@ -250,7 +262,20 @@ impl ItemInterface<ProcessCategory> for ProcessItem {
             // These are sorted with higher values at the top
             ProcessCategory::CPU => other.cpu_usage.cmp(&self.cpu_usage),
             ProcessCategory::Memory => other.memory.cmp(&self.memory),
-            ProcessCategory::GPU => other.gpu_usage.cmp(&self.gpu_usage),
+            ProcessCategory::GPU(gpu_id) => {
+                let self_usage = self
+                    .gpu_usages
+                    .get(&gpu_id)
+                    .map(|x| x.0)
+                    .unwrap_or_default();
+                let other_usage = other
+                    .gpu_usages
+                    .get(&gpu_id)
+                    .map(|x| x.0)
+                    .unwrap_or_default();
+                other_usage.cmp(&self_usage)
+            }
+            ProcessCategory::GPUTotal => other.gpu_total_usage.cmp(&self.gpu_total_usage),
             ProcessCategory::DiskRead => other.disk_read.cmp(&self.disk_read),
             ProcessCategory::DiskWrite => other.disk_write.cmp(&self.disk_write),
             ProcessCategory::DiskTotal => other.disk_total.cmp(&self.disk_total),

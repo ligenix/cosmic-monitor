@@ -488,6 +488,7 @@ impl Application for App {
     /// Creates a view after each update.
     fn view(&self) -> Element<'_, Self::Message> {
         let cosmic_theme::Spacing {
+            space_xl,
             space_m,
             space_s,
             space_xs,
@@ -601,7 +602,7 @@ impl Application for App {
 
                     widget::container(column)
                         .class(theme::Container::Card)
-                        .padding([space_xxs, space_s])
+                        .padding(space_s)
                         .width(300.0)
                         .into()
                 };
@@ -678,13 +679,13 @@ impl Application for App {
                     let Some(usage) = gpu.usage else { continue };
 
                     flex_row.push(card(
-                        GraphKind::GpuUsage(&gpu.bus_id),
+                        GraphKind::GpuUsage(gpu.id),
                         format!("{:.1}%", usage),
                         String::new(),
                         fl!("gpu"),
                         gpu.name.clone(),
                         //TODO: filter by GPU
-                        Some(ProcessCategory::GPU),
+                        Some(ProcessCategory::GPU(gpu.id)),
                         NavPage::Gpu,
                     ));
                 }
@@ -903,7 +904,7 @@ impl Application for App {
                         );
                         gpu_col = gpu_col.push(
                             canvas(
-                                Graph::new(GraphKind::GpuUsage(&gpu.bus_id), &self.graph_history)
+                                Graph::new(GraphKind::GpuUsage(gpu.id), &self.graph_history)
                                     .legend(),
                             )
                             .height(300.0)
@@ -934,11 +935,8 @@ impl Application for App {
                             );
                             gpu_col = gpu_col.push(
                                 canvas(
-                                    Graph::new(
-                                        GraphKind::GpuVram(&gpu.bus_id),
-                                        &self.graph_history,
-                                    )
-                                    .legend(),
+                                    Graph::new(GraphKind::GpuVram(gpu.id), &self.graph_history)
+                                        .legend(),
                                 )
                                 .height(300.0)
                                 .width(Length::Fill),
@@ -1029,6 +1027,7 @@ impl Application for App {
         };
         widget::scrollable(
             widget::column::with_capacity(2)
+                .padding([0, space_xl])
                 .spacing(space_m)
                 .width(Length::Fill)
                 .push(if matches!(nav_page, NavPage::Dashboard) {
