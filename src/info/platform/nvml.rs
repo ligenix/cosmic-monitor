@@ -6,6 +6,7 @@ use super::{GpuId, GpuItem, Platform};
 
 pub struct NvmlPlatform {
     gpu_items: Vec<GpuItem>,
+    last_seen_timestamp: Option<u64>,
     nvml: Option<Nvml>,
     processes: HashMap<Pid, HashMap<GpuId, f32>>,
 }
@@ -14,6 +15,7 @@ impl NvmlPlatform {
     pub fn new() -> Self {
         Self {
             gpu_items: Vec::new(),
+            last_seen_timestamp: None,
             //TODO: only use NVML if GPU is awake
             //TODO: log error?
             nvml: Nvml::init().ok(),
@@ -56,7 +58,7 @@ impl NvmlPlatform {
 
             if refresh_processes {
                 //TODO: last_seen_timestamp
-                for sample in device.process_utilization_stats(None)? {
+                for sample in device.process_utilization_stats(self.last_seen_timestamp)? {
                     let pid = Pid::from_u32(sample.pid);
                     //TODO: use more sample information?
                     *self
@@ -65,6 +67,10 @@ impl NvmlPlatform {
                         .or_insert_with(|| HashMap::new())
                         .entry(gpu_id)
                         .or_insert(0.0) += sample.sm_util as f32;
+                    self.last_seen_timestamp = Some(
+                        self.last_seen_timestamp
+                            .map_or(sample.timestamp, |x| x.max(sample.timestamp)),
+                    );
                 }
             }
         }
