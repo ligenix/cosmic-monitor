@@ -120,11 +120,12 @@ pub struct ProcessItem {
 impl ProcessItem {
     pub fn new(
         p: &Process,
+        cpu_len: usize,
         platform: &Box<dyn Platform>,
         users: &Users,
         refresh: Duration,
     ) -> Self {
-        let cpu_usage = (p.cpu_usage() * 10.0) as u32;
+        let cpu_usage = ((p.cpu_usage() / (cpu_len as f32)) * 10.0) as u32;
         let cpu_usage_str = format!("{}.{}%", cpu_usage / 10, cpu_usage % 10);
 
         let disk_usage = p.disk_usage();

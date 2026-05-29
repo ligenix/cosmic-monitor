@@ -222,6 +222,7 @@ pub fn worker() -> impl Stream<Item = Message> {
                     let graph_item =
                         GraphItem::new(time, &sys, &disks, &networks, &platform, processes_refresh);
 
+                    let cpu_len = sys.cpus().len();
                     let processes = sys.processes();
                     let mut process_items = Vec::with_capacity(processes.len());
                     for (_pid, process) in processes.iter() {
@@ -231,6 +232,7 @@ pub fn worker() -> impl Stream<Item = Message> {
                         }
                         process_items.push(ProcessItem::new(
                             process,
+                            cpu_len,
                             &platform,
                             &users,
                             processes_refresh,
