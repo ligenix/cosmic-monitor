@@ -469,7 +469,7 @@ impl App {
             ));
         }
 
-        let max_width = 640;
+        let max_width = 900;
         let cols = ((size.width as usize) + max_width - 1) / max_width;
         let mut column = widget::column::with_capacity(items.len() / cols).spacing(space_s);
         let mut row = widget::row::with_capacity(cols).spacing(space_s);
