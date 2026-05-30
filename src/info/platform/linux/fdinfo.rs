@@ -7,7 +7,7 @@ pub struct FdInfo {
     pub client_id: c_uint,
     pub gpu_id: GpuId,
     pub engines: Vec<(String, u64, f32)>,
-    pub totals: Vec<(String, u64)>,
+    pub residents: Vec<(String, u64)>,
 }
 
 impl FdInfo {
@@ -44,7 +44,7 @@ impl FdInfo {
     pub fn new(data: &str) -> Option<Self> {
         let mut client_id = None;
         let mut gpu_id = None;
-        let mut totals = Vec::new();
+        let mut residents = Vec::new();
         let mut engines = Vec::new();
         for line in data.lines() {
             let Some((key, value)) = line.split_once(":") else {
@@ -75,7 +75,7 @@ impl FdInfo {
                         }
                     }
                     engines.push((key.to_string(), nanos, 0.0));
-                } else if let Some(key) = key.strip_prefix("total-") {
+                } else if let Some(key) = key.strip_prefix("resident-") {
                     let mut parts = value.splitn(2, ' ');
                     let Ok(mut bytes) = parts.next().unwrap_or_default().parse::<u64>() else {
                         continue;
@@ -94,7 +94,7 @@ impl FdInfo {
                             continue;
                         }
                     }
-                    totals.push((key.to_string(), bytes))
+                    residents.push((key.to_string(), bytes))
                 }
             }
         }
@@ -104,7 +104,7 @@ impl FdInfo {
             client_id: client_id?,
             gpu_id: gpu_id?,
             engines,
-            totals,
+            residents,
         })
     }
 }

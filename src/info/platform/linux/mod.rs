@@ -14,7 +14,7 @@ mod fdinfo;
 
 struct LinuxProcess {
     fdinfos: HashMap<(c_uint, c_uint), FdInfo>,
-    gpu_usages: HashMap<GpuId, f32>,
+    gpu_usages: HashMap<GpuId, (f32, u64)>,
     pid: Pid,
     proc_path: PathBuf,
     time: Instant,
@@ -50,9 +50,18 @@ impl LinuxProcess {
                                     .as_secs_f32()
                                 / duration;
                             //TODO: filter by engine name
-                            *self.gpu_usages.entry(fdinfo.gpu_id).or_insert(0.0) += *usage;
+                            self.gpu_usages.entry(fdinfo.gpu_id).or_insert((0.0, 0)).0 += *usage;
                         }
                     }
+                }
+            }
+            for (name, vram) in fdinfo.residents.iter_mut() {
+                //TODO: figure out what each GPU driver uses for this name
+                match name.as_str() {
+                    "vram" => {
+                        self.gpu_usages.entry(fdinfo.gpu_id).or_insert((0.0, 0)).1 += *vram;
+                    }
+                    _ => {}
                 }
             }
         }
@@ -210,10 +219,18 @@ impl Platform for LinuxPlatform {
 
         // Fill in missing metrics using fdinfo totals
         for gpu_item in self.gpu_items.iter_mut() {
-            if gpu_item.usage.is_none() {
+            let calc_usage = gpu_item.usage.is_none();
+            let calc_vram = gpu_item.vram_used.is_none();
+            if calc_usage || calc_vram {
                 for (_pid, process) in self.processes.iter() {
                     if let Some(usage) = process.gpu_usages.get(&gpu_item.id) {
-                        gpu_item.usage = Some(gpu_item.usage.map_or(*usage, |x| x + *usage));
+                        if calc_usage {
+                            gpu_item.usage = Some(gpu_item.usage.map_or(usage.0, |x| x + usage.0));
+                        }
+                        if calc_vram {
+                            gpu_item.vram_used =
+                                Some(gpu_item.vram_used.map_or(usage.1, |x| x + usage.1));
+                        }
                     }
                 }
             }
@@ -224,7 +241,7 @@ impl Platform for LinuxPlatform {
         self.gpu_items.clone()
     }
 
-    fn process_gpu_usage(&self, pid: Pid) -> HashMap<GpuId, f32> {
+    fn process_gpu_usage(&self, pid: Pid) -> HashMap<GpuId, (f32, u64)> {
         if let Some(process) = self.processes.get(&pid) {
             process.gpu_usages.clone()
         } else {

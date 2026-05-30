@@ -20,8 +20,10 @@ pub enum ProcessCategory {
     PID,
     CPU,
     Memory,
-    GPU(GpuId),
-    GPUTotal,
+    GpuUsage(GpuId),
+    GpuUsageTotal,
+    GpuVram(GpuId),
+    GpuVramTotal,
     DiskRead,
     DiskWrite,
     DiskTotal,
@@ -36,7 +38,8 @@ impl ProcessCategory {
             Self::PID,
             Self::CPU,
             Self::Memory,
-            Self::GPUTotal,
+            Self::GpuUsageTotal,
+            Self::GpuVramTotal,
             Self::DiskRead,
             Self::DiskWrite,
             //TODO: Self::DiskTotal,
@@ -50,8 +53,10 @@ impl ProcessCategory {
             Self::PID
             | Self::CPU
             | Self::Memory
-            | Self::GPU(_)
-            | Self::GPUTotal
+            | Self::GpuUsage(_)
+            | Self::GpuUsageTotal
+            | Self::GpuVram(_)
+            | Self::GpuVramTotal
             | Self::DiskRead
             | Self::DiskWrite
             | Self::DiskTotal => Alignment::End,
@@ -71,8 +76,10 @@ impl fmt::Display for ProcessCategory {
                 Self::PID => "PID".to_string(),
                 Self::CPU => fl!("cpu"),
                 Self::Memory => fl!("memory"),
-                Self::GPU(gpu_id) => format!("GPU {:?}", gpu_id),
-                Self::GPUTotal => fl!("gpu"),
+                Self::GpuUsage(gpu_id) => format!("GPU {:?}", gpu_id),
+                Self::GpuUsageTotal => fl!("gpu"),
+                Self::GpuVram(gpu_id) => format!("GPU VRAM {:?}", gpu_id),
+                Self::GpuVramTotal => fl!("gpu-vram"),
                 Self::DiskRead => "Disk Read".to_string(),
                 Self::DiskWrite => "Disk Write".to_string(),
                 Self::DiskTotal => "Disk Total".to_string(),
@@ -87,17 +94,27 @@ impl ItemCategory for ProcessCategory {
         match self {
             Self::Name => Length::Fill,
             Self::User => Length::Fixed(128.0),
-            Self::PID => Length::Fixed(96.0),
-            Self::CPU => Length::Fixed(64.0),
-            Self::Memory => Length::Fixed(96.0),
-            Self::GPU(_) | Self::GPUTotal => Length::Fixed(64.0),
-            Self::DiskRead | Self::DiskWrite | Self::DiskTotal => Length::Fixed(96.0),
-            Self::Priority => Length::Fixed(96.0),
+            Self::PID | Self::Priority => Length::Fixed(96.0),
+            Self::CPU | Self::GpuUsage(_) | Self::GpuUsageTotal => Length::Fixed(64.0),
+            Self::Memory
+            | Self::GpuVram(_)
+            | Self::GpuVramTotal
+            | Self::DiskRead
+            | Self::DiskWrite
+            | Self::DiskTotal => Length::Fixed(96.0),
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProcessGpuInfo {
+    pub usage: Option<u32>,
+    pub usage_str: String,
+    pub vram: Option<u64>,
+    pub vram_str: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProcessItem {
     pub cpu_usage: u32,
     pub cpu_usage_str: String,
@@ -107,9 +124,8 @@ pub struct ProcessItem {
     pub disk_write_str: String,
     pub disk_total: u64,
     pub disk_total_str: String,
-    pub gpu_usages: HashMap<GpuId, (u32, String)>,
-    pub gpu_total_usage: Option<u32>,
-    pub gpu_total_usage_str: String,
+    pub gpu_usages: HashMap<GpuId, ProcessGpuInfo>,
+    pub gpu_total: ProcessGpuInfo,
     pub memory: u64,
     pub memory_str: String,
     pub name: String,
@@ -150,16 +166,36 @@ impl ProcessItem {
         let pid = p.pid();
         let pid_str = pid.to_string();
 
-        let mut gpu_total_usage = None;
+        let mut gpu_total = ProcessGpuInfo {
+            usage: None,
+            usage_str: String::new(),
+            vram: None,
+            vram_str: String::new(),
+        };
         let mut gpu_usages = HashMap::new();
-        for (gpu_id, usage) in platform.process_gpu_usage(pid) {
-            let gpu_usage = (usage * 10.0) as u32;
-            let gpu_usage_str = format!("{}.{}%", gpu_usage / 10, gpu_usage % 10);
-            gpu_total_usage = Some(gpu_total_usage.map_or(gpu_usage, |x| x + gpu_usage));
-            gpu_usages.insert(gpu_id, (gpu_usage, gpu_usage_str));
+        for (gpu_id, (usage_float, vram)) in platform.process_gpu_usage(pid) {
+            let usage = (usage_float * 10.0) as u32;
+            let usage_str = format!("{}.{}%", usage / 10, usage % 10);
+            gpu_total.usage = Some(gpu_total.usage.map_or(usage, |x| x + usage));
+            let vram_str = format!("{}", humansize::format_size(vram, humansize::BINARY));
+            gpu_total.vram = Some(gpu_total.vram.map_or(vram, |x| x + vram));
+            gpu_usages.insert(
+                gpu_id,
+                ProcessGpuInfo {
+                    usage: Some(usage),
+                    usage_str,
+                    vram: Some(vram),
+                    vram_str,
+                },
+            );
         }
-        let gpu_total_usage_str = gpu_total_usage
+        gpu_total.usage_str = gpu_total
+            .usage
             .map(|x| format!("{}.{}%", x / 10, x % 10))
+            .unwrap_or_default();
+        gpu_total.vram_str = gpu_total
+            .vram
+            .map(|x| format!("{}", humansize::format_size(x, humansize::BINARY)))
             .unwrap_or_default();
 
         let memory = p.memory();
@@ -197,8 +233,7 @@ impl ProcessItem {
             disk_total,
             disk_total_str,
             gpu_usages,
-            gpu_total_usage,
-            gpu_total_usage_str,
+            gpu_total,
             memory,
             memory_str,
             name: p.name().to_string_lossy().into(),
@@ -217,12 +252,18 @@ impl ProcessItem {
             ProcessCategory::PID => &self.pid_str,
             ProcessCategory::CPU => &self.cpu_usage_str,
             ProcessCategory::Memory => &self.memory_str,
-            ProcessCategory::GPU(gpu_id) => &self
+            ProcessCategory::GpuUsage(gpu_id) => &self
                 .gpu_usages
                 .get(&gpu_id)
-                .map(|x| x.1.as_str())
+                .map(|x| x.usage_str.as_str())
                 .unwrap_or_default(),
-            ProcessCategory::GPUTotal => &self.gpu_total_usage_str,
+            ProcessCategory::GpuUsageTotal => &self.gpu_total.usage_str,
+            ProcessCategory::GpuVram(gpu_id) => &self
+                .gpu_usages
+                .get(&gpu_id)
+                .map(|x| x.vram_str.as_str())
+                .unwrap_or_default(),
+            ProcessCategory::GpuVramTotal => &self.gpu_total.vram_str,
             ProcessCategory::DiskRead => &self.disk_read_str,
             ProcessCategory::DiskWrite => &self.disk_write_str,
             ProcessCategory::DiskTotal => &self.disk_total_str,
@@ -262,20 +303,34 @@ impl ItemInterface<ProcessCategory> for ProcessItem {
             // These are sorted with higher values at the top
             ProcessCategory::CPU => other.cpu_usage.cmp(&self.cpu_usage),
             ProcessCategory::Memory => other.memory.cmp(&self.memory),
-            ProcessCategory::GPU(gpu_id) => {
+            ProcessCategory::GpuUsage(gpu_id) => {
                 let self_usage = self
                     .gpu_usages
                     .get(&gpu_id)
-                    .map(|x| x.0)
+                    .map(|x| x.usage)
                     .unwrap_or_default();
                 let other_usage = other
                     .gpu_usages
                     .get(&gpu_id)
-                    .map(|x| x.0)
+                    .map(|x| x.usage)
                     .unwrap_or_default();
                 other_usage.cmp(&self_usage)
             }
-            ProcessCategory::GPUTotal => other.gpu_total_usage.cmp(&self.gpu_total_usage),
+            ProcessCategory::GpuUsageTotal => other.gpu_total.usage.cmp(&self.gpu_total.usage),
+            ProcessCategory::GpuVram(gpu_id) => {
+                let self_usage = self
+                    .gpu_usages
+                    .get(&gpu_id)
+                    .map(|x| x.vram)
+                    .unwrap_or_default();
+                let other_usage = other
+                    .gpu_usages
+                    .get(&gpu_id)
+                    .map(|x| x.vram)
+                    .unwrap_or_default();
+                other_usage.cmp(&self_usage)
+            }
+            ProcessCategory::GpuVramTotal => other.gpu_total.vram.cmp(&self.gpu_total.vram),
             ProcessCategory::DiskRead => other.disk_read.cmp(&self.disk_read),
             ProcessCategory::DiskWrite => other.disk_write.cmp(&self.disk_write),
             ProcessCategory::DiskTotal => other.disk_total.cmp(&self.disk_total),

@@ -283,21 +283,18 @@ impl App {
         } = theme::active().cosmic().spacing;
 
         let card = |graph_kind,
-                    graph_left,
-                    graph_right,
                     name,
+                    data,
                     caption,
                     process_category: Option<ProcessCategory>,
                     nav_page: NavPage|
          -> Element<Message> {
             let mut column = widget::column::with_capacity(7)
                 .spacing(space_xxs)
-                .push(widget::row!(
-                    widget::text::body(graph_left).width(Length::Fill),
-                    widget::text::body(graph_right).width(Length::Fill),
-                ))
+                .push(widget::text::title4(name))
                 .push(widget::column!(
-                    widget::text::body(name),
+                    widget::text::body(data)
+                        .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1))),
                     widget::text::caption(caption)
                         .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1))),
                 ));
@@ -376,7 +373,7 @@ impl App {
                     canvas(Graph::new(graph_kind, &self.graph_history).border())
                         .height(176.0)
                         .width(Length::Fill),
-                    column
+                    column.width(Length::Fill)
                 )
                 .spacing(space_xs),
             )
@@ -386,12 +383,11 @@ impl App {
             .into()
         };
 
-        let mut items = Vec::with_capacity(4 + graph_item.gpus.len());
+        let mut items = Vec::with_capacity(4 + graph_item.gpus.len() * 2);
         items.push(card(
             GraphKind::Cpu,
-            format!("{:.1}%", graph_item.total_cpu_usage()),
-            String::new(),
             fl!("cpu"),
+            format!("{:.1}%", graph_item.total_cpu_usage()),
             graph_item
                 .cpus
                 .first()
@@ -403,15 +399,12 @@ impl App {
 
         items.push(card(
             GraphKind::Memory,
+            fl!("memory"),
             format!(
-                "{:.1}%",
+                "{:.1}% / {}",
                 100.0 * (graph_item.memory.used as f32) / (graph_item.memory.total as f32),
-            ),
-            format!(
-                "{}",
                 humansize::format_size(graph_item.memory.used, humansize::BINARY),
             ),
-            fl!("memory"),
             format!(
                 "{}",
                 humansize::format_size(graph_item.memory.total, humansize::BINARY),
@@ -423,15 +416,12 @@ impl App {
         let disk_io = graph_item.total_disk_io();
         items.push(card(
             GraphKind::DiskTotal,
+            fl!("disk"),
             format!(
-                "{}/s read",
+                "{}/s read / {}/s write",
                 humansize::format_size(disk_io.0 as u64, humansize::DECIMAL),
-            ),
-            format!(
-                "{}/s write",
                 humansize::format_size(disk_io.1 as u64, humansize::DECIMAL)
             ),
-            fl!("disk"),
             String::new(),
             Some(ProcessCategory::DiskTotal),
             NavPage::Disk,
@@ -440,33 +430,45 @@ impl App {
         let network_io = graph_item.total_network_io();
         items.push(card(
             GraphKind::NetworkTotal,
+            fl!("network"),
             format!(
-                "{}/s rx",
+                "{}/s rx / {}/s tx",
                 humansize::format_size(network_io.0 as u64, humansize::DECIMAL),
-            ),
-            format!(
-                "{}/s tx",
                 humansize::format_size(network_io.1 as u64, humansize::DECIMAL)
             ),
-            fl!("network"),
             String::new(),
             None,
             NavPage::Network,
         ));
 
         for gpu in graph_item.gpus.iter() {
-            let Some(usage) = gpu.usage else { continue };
-
-            items.push(card(
-                GraphKind::GpuUsage(gpu.id),
-                format!("{:.1}%", usage),
-                String::new(),
-                fl!("gpu"),
-                gpu.name.clone(),
-                //TODO: filter by GPU
-                Some(ProcessCategory::GPU(gpu.id)),
-                NavPage::Gpu,
-            ));
+            if let Some(usage) = gpu.usage {
+                items.push(card(
+                    GraphKind::GpuUsage(gpu.id),
+                    fl!("gpu"),
+                    format!("{:.1}%", usage),
+                    gpu.name.clone(),
+                    Some(ProcessCategory::GpuUsage(gpu.id)),
+                    NavPage::Gpu,
+                ));
+            }
+            if let Some(vram_used) = gpu.vram_used {
+                if let Some(vram_total) = gpu.vram_total {
+                    items.push(card(
+                        GraphKind::GpuVram(gpu.id),
+                        fl!("gpu-vram"),
+                        format!(
+                            "{:.1}% / {}",
+                            100.0 * (vram_used as f32) / (vram_total as f32),
+                            humansize::format_size(vram_used, humansize::BINARY),
+                        ),
+                        //TODO: show vram total format!("{}", humansize::format_size(vram_total, humansize::BINARY)),
+                        gpu.name.clone(),
+                        Some(ProcessCategory::GpuVram(gpu.id)),
+                        NavPage::Gpu,
+                    ));
+                }
+            }
         }
 
         let mut cols = 1;

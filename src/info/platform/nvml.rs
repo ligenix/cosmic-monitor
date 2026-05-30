@@ -1,4 +1,4 @@
-use nvml_wrapper::{Nvml, error::NvmlError};
+use nvml_wrapper::{Nvml, enums::device::UsedGpuMemory, error::NvmlError};
 use std::collections::HashMap;
 use sysinfo::Pid;
 
@@ -8,7 +8,7 @@ pub struct NvmlPlatform {
     gpu_items: Vec<GpuItem>,
     last_seen_timestamp: Option<u64>,
     nvml: Option<Nvml>,
-    processes: HashMap<Pid, HashMap<GpuId, f32>>,
+    processes: HashMap<Pid, HashMap<GpuId, (f32, u64)>>,
 }
 
 impl NvmlPlatform {
@@ -57,21 +57,32 @@ impl NvmlPlatform {
             });
 
             if refresh_processes {
-                //TODO: last_seen_timestamp
                 for sample in device.process_utilization_stats(self.last_seen_timestamp)? {
                     let pid = Pid::from_u32(sample.pid);
                     //TODO: use more sample information?
-                    *self
-                        .processes
+                    self.processes
                         .entry(pid)
                         .or_insert_with(|| HashMap::new())
                         .entry(gpu_id)
-                        .or_insert(0.0) += sample.sm_util as f32;
+                        .or_insert((0.0, 0))
+                        .0 += sample.sm_util as f32;
                     self.last_seen_timestamp = Some(
                         self.last_seen_timestamp
                             .map_or(sample.timestamp, |x| x.max(sample.timestamp)),
                     );
                 }
+                for process in device.running_graphics_processes()? {
+                    if let UsedGpuMemory::Used(vram) = process.used_gpu_memory {
+                        let pid = Pid::from_u32(process.pid);
+                        self.processes
+                            .entry(pid)
+                            .or_insert_with(|| HashMap::new())
+                            .entry(gpu_id)
+                            .or_insert((0.0, 0))
+                            .1 += vram;
+                    }
+                }
+                //TODO: device.running_compute_processes() without double counting
             }
         }
 
@@ -89,7 +100,7 @@ impl Platform for NvmlPlatform {
         self.gpu_items.clone()
     }
 
-    fn process_gpu_usage(&self, pid: Pid) -> HashMap<GpuId, f32> {
+    fn process_gpu_usage(&self, pid: Pid) -> HashMap<GpuId, (f32, u64)> {
         if let Some(usages) = self.processes.get(&pid) {
             //TODO: use more sample information?
             usages.clone()

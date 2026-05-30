@@ -13,6 +13,7 @@ network = Network
 
 ## Dashboard
 details = Details
+gpu-vram = GPU VRAM
 
 ## CPU
 overall-utilization = Overall Utilization

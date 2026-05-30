@@ -16,7 +16,7 @@ pub trait Platform: Send + Sync {
         Vec::new()
     }
 
-    fn process_gpu_usage(&self, _pid: Pid) -> HashMap<GpuId, f32> {
+    fn process_gpu_usage(&self, _pid: Pid) -> HashMap<GpuId, (f32, u64)> {
         HashMap::new()
     }
 }
