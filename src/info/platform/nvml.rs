@@ -1,6 +1,8 @@
-use nvml_wrapper::{Nvml, enums::device::UsedGpuMemory, error::NvmlError};
+use nvml_wrapper::{
+    Nvml, enum_wrappers::device::TemperatureSensor, enums::device::UsedGpuMemory, error::NvmlError,
+};
 use std::collections::HashMap;
-use sysinfo::Pid;
+use sysinfo::{Components, Pid};
 
 use super::{GpuId, GpuItem, Platform};
 
@@ -46,11 +48,13 @@ impl NvmlPlatform {
                 //TODO: would this ever be non-zero?
                 func: 0,
             };
+            let temp = device.temperature(TemperatureSensor::Gpu)?;
             let util = device.utilization_rates()?;
 
             self.gpu_items.push(GpuItem {
                 id: gpu_id,
                 name,
+                temp: Some(temp as f32),
                 usage: Some(util.gpu as f32),
                 vram_used: Some(memory_info.used),
                 vram_total: Some(memory_info.total),
@@ -91,7 +95,7 @@ impl NvmlPlatform {
 }
 
 impl Platform for NvmlPlatform {
-    fn refresh(&mut self, processes: bool) {
+    fn refresh(&mut self, _components: &Components, processes: bool) {
         //TODO: log error?
         let _ = self.refresh_inner(processes);
     }

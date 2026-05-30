@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use sysinfo::Pid;
+use sysinfo::{Components, Pid};
 
 use super::{GpuId, GpuItem};
 
@@ -10,7 +10,7 @@ mod linux;
 mod nvml;
 
 pub trait Platform: Send + Sync {
-    fn refresh(&mut self, _refresh_processes: bool) {}
+    fn refresh(&mut self, _components: &Components, _refresh_processes: bool) {}
 
     fn gpus(&self) -> Vec<GpuItem> {
         Vec::new()

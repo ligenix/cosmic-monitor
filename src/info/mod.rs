@@ -50,6 +50,7 @@ impl GraphItem {
     pub fn new(
         time: Instant,
         sys: &System,
+        components: &Components,
         disks: &Disks,
         networks: &Networks,
         platform: &Box<dyn Platform>,
@@ -58,7 +59,7 @@ impl GraphItem {
         let cpus = sys.cpus();
         let mut cpu_items = Vec::with_capacity(cpus.len());
         for cpu in cpus {
-            cpu_items.push(CpuItem::new(cpu));
+            cpu_items.push(CpuItem::new(cpu, components));
         }
 
         let disk_list = disks.list();
@@ -90,6 +91,24 @@ impl GraphItem {
             memory: MemoryItem::new(&sys),
             networks: network_items,
         }
+    }
+
+    pub fn max_cpu_temp(&self) -> Option<f32> {
+        let mut max = None;
+        for cpu in self.cpus.iter() {
+            if let Some(temp) = cpu.temp {
+                max = Some(max.map_or(temp, |x| temp.max(x)));
+            }
+        }
+        max
+    }
+
+    pub fn max_cpu_frequency(&self) -> u64 {
+        let mut max = 0;
+        for cpu in self.cpus.iter() {
+            max = cpu.frequency.max(max);
+        }
+        max
     }
 
     pub fn total_cpu_usage(&self) -> f32 {
@@ -134,34 +153,25 @@ pub fn worker() -> impl Stream<Item = Message> {
             let platform_lock = platform_lock.clone();
             let tx = tx.clone();
             thread::spawn(move || {
-                //TODO: use components
-                let components = Components::new_with_refreshed_list();
-                for component in components.list() {
-                    eprintln!(
-                        "{:?}: {}: {:?}",
-                        component.id(),
-                        component.label(),
-                        component.temperature()
-                    );
-                }
-
                 // Ignore first samples so disk and network speeds are accurate
                 let mut ignore = 4;
                 let mut sys = System::new();
+                let mut components = Components::new();
                 let mut disks = Disks::new();
                 let mut networks = Networks::new();
                 loop {
                     let time = Instant::now();
                     sys.refresh_specifics(
                         RefreshKind::nothing()
-                            .with_cpu(CpuRefreshKind::nothing().with_cpu_usage())
+                            .with_cpu(CpuRefreshKind::nothing().with_cpu_usage().with_frequency())
                             .with_memory(MemoryRefreshKind::nothing().with_ram().with_swap()),
                     );
+                    components.refresh(true);
                     disks.refresh(true);
                     networks.refresh(true);
                     {
                         let mut platform = platform_lock.write().unwrap();
-                        platform.refresh(false);
+                        platform.refresh(&components, false);
                     }
 
                     if ignore > 0 {
@@ -172,6 +182,7 @@ pub fn worker() -> impl Stream<Item = Message> {
                             Message::Graph(GraphItem::new(
                                 time,
                                 &sys,
+                                &components,
                                 &disks,
                                 &networks,
                                 &platform,
@@ -194,13 +205,14 @@ pub fn worker() -> impl Stream<Item = Message> {
             //TODO: refresh users periodically?
             let users = Users::new_with_refreshed_list();
             let mut sys = System::new();
+            let mut components = Components::new();
             let mut disks = Disks::new();
             let mut networks = Networks::new();
             loop {
                 let time = Instant::now();
                 sys.refresh_specifics(
                     RefreshKind::nothing()
-                        .with_cpu(CpuRefreshKind::nothing().with_cpu_usage())
+                        .with_cpu(CpuRefreshKind::nothing().with_cpu_usage().with_frequency())
                         .with_memory(MemoryRefreshKind::nothing().with_ram().with_swap())
                         .with_processes(
                             ProcessRefreshKind::nothing()
@@ -210,17 +222,25 @@ pub fn worker() -> impl Stream<Item = Message> {
                                 .with_user(UpdateKind::OnlyIfNotSet),
                         ),
                 );
+                components.refresh(true);
                 disks.refresh(true);
                 networks.refresh(true);
                 {
                     let mut platform = platform_lock.write().unwrap();
-                    platform.refresh(true);
+                    platform.refresh(&components, true);
                 }
 
                 let message = {
                     let platform = platform_lock.read().unwrap();
-                    let graph_item =
-                        GraphItem::new(time, &sys, &disks, &networks, &platform, processes_refresh);
+                    let graph_item = GraphItem::new(
+                        time,
+                        &sys,
+                        &components,
+                        &disks,
+                        &networks,
+                        &platform,
+                        processes_refresh,
+                    );
 
                     let cpu_len = sys.cpus().len();
                     let processes = sys.processes();

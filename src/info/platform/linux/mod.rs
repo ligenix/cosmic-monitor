@@ -5,7 +5,7 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
-use sysinfo::Pid;
+use sysinfo::{Components, Pid};
 
 use super::{GpuId, GpuItem, Platform};
 
@@ -94,8 +94,8 @@ impl LinuxPlatform {
 }
 
 impl Platform for LinuxPlatform {
-    fn refresh(&mut self, refresh_processes: bool) {
-        self.nvml.refresh(refresh_processes);
+    fn refresh(&mut self, components: &Components, refresh_processes: bool) {
+        self.nvml.refresh(components, refresh_processes);
 
         // Refreshed first so total Intel GPU metrics can be calculated
         if refresh_processes {
@@ -180,6 +180,8 @@ impl Platform for LinuxPlatform {
                 let mut gpu_item = GpuItem {
                     id: id_opt.unwrap_or(GpuId::Other(id)),
                     name,
+                    //TODO: find GPU temp
+                    temp: None,
                     usage: None,
                     vram_used: None,
                     vram_total: None,
@@ -199,6 +201,29 @@ impl Platform for LinuxPlatform {
                     gpu_item.vram_total = data.trim().parse().ok();
                 };
 
+                if let Ok(entries) = fs::read_dir(device_path.join("hwmon")) {
+                    for entry_res in entries {
+                        let Ok(entry) = entry_res else { continue };
+                        let file_name = entry.file_name();
+                        let Some(file_name_str) = file_name.to_str() else {
+                            continue;
+                        };
+                        for component in components {
+                            let Some(id) = component.id() else { continue };
+                            let Some((hwmon, _index)) = id.split_once('_') else {
+                                continue;
+                            };
+                            if hwmon != file_name_str {
+                                continue;
+                            }
+                            let Some(temp) = component.temperature() else {
+                                continue;
+                            };
+                            gpu_item.temp = Some(gpu_item.temp.map_or(temp, |x| temp.max(x)));
+                        }
+                    }
+                }
+
                 self.gpu_items.push(gpu_item)
             }
         }
@@ -208,6 +233,7 @@ impl Platform for LinuxPlatform {
                 if gpu.id == nvml_gpu.id {
                     // Copy fields that NVML will know better than DRM
                     gpu.name = nvml_gpu.name;
+                    gpu.temp = nvml_gpu.temp;
                     gpu.usage = nvml_gpu.usage;
                     gpu.vram_used = nvml_gpu.vram_used;
                     gpu.vram_total = nvml_gpu.vram_total;

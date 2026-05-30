@@ -387,7 +387,20 @@ impl App {
         items.push(card(
             GraphKind::Cpu,
             fl!("cpu"),
-            format!("{:.1}%", graph_item.total_cpu_usage()),
+            if let Some(temp) = graph_item.max_cpu_temp() {
+                format!(
+                    "{:.1}% / {} MHz / {:.1}°C",
+                    graph_item.total_cpu_usage(),
+                    graph_item.max_cpu_frequency(),
+                    temp
+                )
+            } else {
+                format!(
+                    "{:.1}% / {} MHz",
+                    graph_item.total_cpu_usage(),
+                    graph_item.max_cpu_frequency()
+                )
+            },
             graph_item
                 .cpus
                 .first()
@@ -446,7 +459,11 @@ impl App {
                 items.push(card(
                     GraphKind::GpuUsage(gpu.id),
                     fl!("gpu"),
-                    format!("{:.1}%", usage),
+                    if let Some(temp) = gpu.temp {
+                        format!("{:.1}% / {:.1}°C", usage, temp)
+                    } else {
+                        format!("{:.1}%", usage)
+                    },
                     gpu.name.clone(),
                     Some(ProcessCategory::GpuUsage(gpu.id)),
                     NavPage::Gpu,
@@ -810,11 +827,18 @@ impl Application for App {
                             ),
                             widget::column!(
                                 widget::text::body(fl!("speed")),
-                                widget::text::heading("TODO GHz")
+                                widget::text::heading(format!(
+                                    "{} MHz",
+                                    graph_item.max_cpu_frequency()
+                                ))
                             ),
                             widget::column!(
                                 widget::text::body(fl!("temperature")),
-                                widget::text::heading("TODO °C")
+                                widget::text::heading(
+                                    graph_item
+                                        .max_cpu_temp()
+                                        .map_or("N/A".into(), |temp| format!("{:.1}°C", temp))
+                                )
                             ),
                         )
                         .spacing(space_m),
@@ -938,10 +962,19 @@ impl Application for App {
                     gpu_col = gpu_col.push(widget::text::title4(&gpu.name));
                     if let Some(usage) = gpu.usage {
                         gpu_col = gpu_col.push(
-                            widget::row!(widget::column!(
-                                widget::text::body(fl!("utilization")),
-                                widget::text::heading(format!("{:.1}%", usage))
-                            ),)
+                            widget::row!(
+                                widget::column!(
+                                    widget::text::body(fl!("utilization")),
+                                    widget::text::heading(format!("{:.1}%", usage))
+                                ),
+                                widget::column!(
+                                    widget::text::body(fl!("temperature")),
+                                    widget::text::heading(
+                                        gpu.temp
+                                            .map_or("N/A".into(), |temp| format!("{:.1}°C", temp))
+                                    )
+                                ),
+                            )
                             .spacing(space_m),
                         );
                         gpu_col = gpu_col.push(
