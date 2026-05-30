@@ -40,9 +40,8 @@ impl ProcessCategory {
             Self::Memory,
             Self::GpuUsageTotal,
             Self::GpuVramTotal,
-            Self::DiskRead,
-            Self::DiskWrite,
-            //TODO: Self::DiskTotal,
+            // Having both disk read and write takes up too much space
+            Self::DiskTotal,
             Self::Priority,
         ]
     }
@@ -82,7 +81,7 @@ impl fmt::Display for ProcessCategory {
                 Self::GpuVramTotal => fl!("gpu-vram"),
                 Self::DiskRead => "Disk Read".to_string(),
                 Self::DiskWrite => "Disk Write".to_string(),
-                Self::DiskTotal => "Disk Total".to_string(),
+                Self::DiskTotal => fl!("disk"),
                 Self::Priority => "Priority".to_string(),
             }
         )
@@ -93,8 +92,7 @@ impl ItemCategory for ProcessCategory {
     fn width(&self) -> Length {
         match self {
             Self::Name => Length::Fill,
-            Self::User => Length::Fixed(128.0),
-            Self::PID | Self::Priority => Length::Fixed(96.0),
+            Self::User | Self::PID | Self::Priority => Length::Fixed(96.0),
             Self::CPU | Self::GpuUsage(_) | Self::GpuUsageTotal => Length::Fixed(64.0),
             Self::Memory
             | Self::GpuVram(_)
