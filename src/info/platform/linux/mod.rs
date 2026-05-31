@@ -73,6 +73,7 @@ impl LinuxProcess {
 }
 
 pub struct LinuxPlatform {
+    amdgpu_ids: HashMap<(u16, u8), String>,
     gpu_items: Vec<GpuItem>,
     nvml: Box<dyn Platform>,
     processes: HashMap<Pid, LinuxProcess>,
@@ -81,7 +82,29 @@ pub struct LinuxPlatform {
 
 impl LinuxPlatform {
     pub fn new() -> Self {
+        let mut amdgpu_ids = HashMap::new();
+        if let Ok(data) = fs::read_to_string("/usr/share/libdrm/amdgpu.ids") {
+            for line in data.lines() {
+                if line.starts_with("#") {
+                    continue;
+                }
+                let mut parts = line.splitn(3, ",\t");
+                let Some(id_str) = parts.next() else { continue };
+                let Some(rev_str) = parts.next() else {
+                    continue;
+                };
+                let Some(name) = parts.next() else { continue };
+                let Ok(id) = u16::from_str_radix(id_str, 16) else {
+                    continue;
+                };
+                let Ok(rev) = u8::from_str_radix(rev_str, 16) else {
+                    continue;
+                };
+                amdgpu_ids.insert((id, rev), name.to_string());
+            }
+        }
         Self {
+            amdgpu_ids,
             gpu_items: Vec::new(),
             #[cfg(feature = "nvml")]
             nvml: Box::new(super::nvml::NvmlPlatform::new()),
@@ -152,6 +175,13 @@ impl Platform for LinuxPlatform {
                     let device_str = fs::read_to_string(device_path.join("device"))?;
                     let device_id =
                         u16::from_str_radix(device_str.trim().trim_start_matches("0x"), 16)?;
+                    if vendor_id == 0x1002 {
+                        let rev_str = fs::read_to_string(device_path.join("revision"))?;
+                        let rev = u8::from_str_radix(rev_str.trim().trim_start_matches("0x"), 16)?;
+                        if let Some(name) = self.amdgpu_ids.get(&(device_id, rev)) {
+                            return Ok(name.to_string());
+                        }
+                    }
                     if let Some(entry) = pci_ids::Device::from_vid_pid(vendor_id, device_id) {
                         Ok(format!(
                             "{} {}",

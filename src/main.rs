@@ -490,7 +490,7 @@ impl App {
 
         let mut cols = 1;
         let min_width = 440.0;
-        while cols < 3 && size.width / ((cols + 1) as f32) > min_width {
+        while cols < 4 && size.width / ((cols + 1) as f32) > min_width {
             cols += 1;
         }
         let mut column = widget::column::with_capacity(items.len() / cols).spacing(space_s);
