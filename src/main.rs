@@ -1149,44 +1149,127 @@ impl Application for App {
                 column.into()
             }
             (NavPage::Disk, Some(graph_item)) => {
-                let mut column =
-                    widget::column::with_capacity(graph_item.disks.len() * 8).width(Length::Fill);
+                let mut column = widget::column::with_capacity(2 + graph_item.disks.len() * 3)
+                    .spacing(space_m)
+                    .width(Length::Fill);
+
+                let all_used = graph_item.disks.iter().fold(0, |x, disk| x + disk.used);
+                let all_total = graph_item.disks.iter().fold(0, |x, disk| x + disk.total);
+                let all_io = graph_item.total_disk_io();
+                column = column.push(
+                    widget::column!(
+                        widget::text::title4(fl!("all-disks")),
+                        widget::row!(
+                            widget::column!(
+                                widget::text::body(fl!("capacity")),
+                                widget::text::heading(
+                                    humansize::format_size(all_total, humansize::BINARY)
+                                        .to_string()
+                                )
+                            ),
+                            widget::column!(
+                                widget::text::body(fl!("in-use")),
+                                widget::text::heading(format!(
+                                    "{} ({:.1}%)",
+                                    humansize::format_size(all_used, humansize::BINARY),
+                                    100.0 * (all_used as f64) / (all_total as f64)
+                                ))
+                            ),
+                            widget::column!(
+                                widget::text::body(fl!("reading")),
+                                widget::text::heading(format!(
+                                    "{}/s",
+                                    humansize::format_size(all_io.0 as u64, humansize::DECIMAL)
+                                ))
+                            ),
+                            widget::column!(
+                                widget::text::body(fl!("writing")),
+                                widget::text::heading(format!(
+                                    "{}/s",
+                                    humansize::format_size(all_io.1 as u64, humansize::DECIMAL)
+                                ))
+                            ),
+                        )
+                        .spacing(space_m),
+                        canvas(Graph::new(GraphKind::DiskTotal, &self.graph_history).legend())
+                            .height(300.0)
+                            .width(Length::Fill),
+                    )
+                    .spacing(space_xxs),
+                );
+
+                // Top processes
+                column = column.push(self.top_processes_by(ProcessCategory::DiskTotal, 5));
+
                 for disk in graph_item.disks.iter() {
-                    column = column.push(widget::text(format!("Name: {}", disk.name)));
-                    column = column.push(widget::text(format!(
-                        "Used: {} ({:.1}%)",
-                        humansize::format_size(disk.used, humansize::DECIMAL),
-                        100.0 * (disk.used as f64) / (disk.total as f64)
-                    )));
-                    column = column.push(widget::text(format!(
-                        "Total: {}",
-                        humansize::format_size(disk.total, humansize::DECIMAL)
-                    )));
-                    column = column.push(widget::text(format!(
-                        "Read: {}/s",
-                        humansize::format_size(disk.read as u64, humansize::DECIMAL)
-                    )));
                     column = column.push(
-                        canvas(
-                            Graph::new(GraphKind::DiskRead(&disk.name), &self.graph_history)
-                                .legend(),
+                        widget::column!(
+                            widget::text::title4(&disk.name),
+                            widget::row!(
+                                widget::column!(
+                                    widget::text::body(fl!("capacity")),
+                                    widget::text::heading(
+                                        humansize::format_size(disk.total, humansize::BINARY)
+                                            .to_string()
+                                    )
+                                ),
+                                widget::column!(
+                                    widget::text::body(fl!("in-use")),
+                                    widget::text::heading(format!(
+                                        "{} ({:.1}%)",
+                                        humansize::format_size(disk.used, humansize::BINARY),
+                                        100.0 * (disk.used as f64) / (disk.total as f64)
+                                    ))
+                                ),
+                                widget::column!(
+                                    widget::text::body(fl!("reading")),
+                                    widget::text::heading(format!(
+                                        "{}/s",
+                                        humansize::format_size(
+                                            disk.read as u64,
+                                            humansize::DECIMAL
+                                        )
+                                    ))
+                                ),
+                                widget::column!(
+                                    widget::text::body(fl!("writing")),
+                                    widget::text::heading(format!(
+                                        "{}/s",
+                                        humansize::format_size(
+                                            disk.write as u64,
+                                            humansize::DECIMAL
+                                        )
+                                    ))
+                                ),
+                            )
+                            .spacing(space_m)
                         )
-                        .height(300.0)
-                        .width(Length::Fill),
+                        .spacing(space_xxs),
                     );
-                    column = column.push(widget::text(format!(
-                        "Write: {}/s",
-                        humansize::format_size(disk.write as u64, humansize::DECIMAL)
-                    )));
                     column = column.push(
-                        canvas(
-                            Graph::new(GraphKind::DiskWrite(&disk.name), &self.graph_history)
-                                .legend(),
+                        widget::column!(
+                            widget::text::title4(fl!("reading")),
+                            canvas(
+                                Graph::new(GraphKind::DiskRead(&disk.name), &self.graph_history)
+                                    .legend(),
+                            )
+                            .height(300.0)
+                            .width(Length::Fill)
                         )
-                        .height(300.0)
-                        .width(Length::Fill),
+                        .spacing(space_xxs),
                     );
-                    column = column.push(widget::space().height(20.0));
+                    column = column.push(
+                        widget::column!(
+                            widget::text::title4(fl!("writing")),
+                            canvas(
+                                Graph::new(GraphKind::DiskWrite(&disk.name), &self.graph_history)
+                                    .legend(),
+                            )
+                            .height(300.0)
+                            .width(Length::Fill)
+                        )
+                        .spacing(space_xxs),
+                    );
                 }
                 column.into()
             }

@@ -34,6 +34,11 @@ total-utilization = Total utilization
 ## GPU
 vram = VRAM
 
+## Disk
+all-disks = All disks
+reading = Reading
+writing = Writing
+
 # Context Pages
 
 ## About
