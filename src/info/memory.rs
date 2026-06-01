@@ -11,10 +11,15 @@ pub struct MemoryItem {
 
 impl MemoryItem {
     pub fn new(sys: &System) -> Self {
+        let total = sys.total_memory();
+        let used = total.saturating_sub(sys.available_memory());
+        let used_plus_cache = total.saturating_sub(sys.free_memory());
+        //TODO: this may not be completely accurate
+        let cache = used_plus_cache.saturating_sub(used);
         Self {
-            cache: sys.available_memory() - sys.free_memory(),
-            used: sys.used_memory(),
-            total: sys.total_memory(),
+            cache,
+            used,
+            total,
             swap_used: sys.used_swap(),
             swap_total: sys.total_swap(),
         }

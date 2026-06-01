@@ -20,6 +20,7 @@ use cosmic::{
         table::{ItemCategory, ItemInterface},
     },
 };
+use itertools::Itertools;
 use std::{
     any::TypeId,
     collections::{HashMap, VecDeque},
@@ -164,6 +165,7 @@ pub enum Message {
     LaunchUrl(String),
     NavPage(NavPage),
     ProcessSort(ProcessCategory),
+    SeeAllProcesses(ProcessCategory, bool),
     Snapshot(GraphItem, Vec<ProcessItem>),
     Surface(surface::Action),
     SystemThemeChange,
@@ -280,6 +282,72 @@ impl App {
         );
 
         widget::settings::view_column(vec![appearance_section.into()]).into()
+    }
+
+    fn top_processes_by<'a>(
+        &'a self,
+        sort_category: ProcessCategory,
+        count: usize,
+    ) -> Element<'a, Message> {
+        //TODO: do not duplicate code to create process table
+        let categories = &[
+            ProcessCategory::Name,
+            ProcessCategory::CPU,
+            ProcessCategory::Memory,
+            ProcessCategory::GpuUsageTotal,
+            ProcessCategory::GpuVramTotal,
+            ProcessCategory::DiskTotal,
+        ];
+        let mut column = widget::column::with_capacity(count + 2);
+        let mut header = widget::row::with_capacity(categories.len()).align_y(Alignment::Center);
+        for &category in categories {
+            let mut row = widget::row::with_capacity(2)
+                .align_y(Alignment::Center)
+                .height(Length::Fixed(24.0))
+                .padding([0, 8])
+                .width(category.width());
+            row = row.push(widget::text::heading(category.to_string()));
+            if category == sort_category {
+                row = row.push(widget::icon::from_name("pan-down-symbolic").size(16));
+            }
+            header = header.push(row);
+        }
+        column = column.push(header);
+        for item in self
+            .processes
+            .iter()
+            .k_smallest_by(count, |a, b| a.compare(b, sort_category))
+        {
+            let mut row = widget::row::with_capacity(categories.len()).align_y(Alignment::Center);
+            for &category in categories {
+                row = row.push(
+                    widget::container(
+                        widget::text(item.text(category))
+                            .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
+                            .shaping(Shaping::Basic),
+                    )
+                    .align_x(category.data_align())
+                    .align_y(Alignment::Center)
+                    .padding([0, 8])
+                    .height(Length::Fixed(40.0))
+                    .width(category.width()),
+                );
+            }
+            column = column.push(
+                widget::column::with_capacity(2)
+                    .push(widget::divider::horizontal::default())
+                    .push(row),
+            );
+        }
+        column = column.push(
+            widget::column::with_capacity(2)
+                .push(widget::divider::horizontal::default())
+                .push(
+                    widget::button::text(fl!("see-all-processes"))
+                        .on_press(Message::SeeAllProcesses(sort_category, false)),
+                ),
+        );
+        column.into()
     }
 
     fn view_dashboard<'a>(&'a self, graph_item: &'a GraphItem, size: Size) -> Element<'a, Message> {
@@ -686,6 +754,11 @@ impl Application for App {
                 }
                 self.update_processes();
             }
+            Message::SeeAllProcesses(category, direction) => {
+                self.process_sort = (category, direction);
+                self.update_processes();
+                return self.update(Message::NavPage(NavPage::Processes));
+            }
             Message::Snapshot(graph_item, processes) => {
                 self.graph_snapshot = Some(graph_item);
                 self.processes = processes;
@@ -817,7 +890,7 @@ impl Application for App {
                 .into()
             }
             (NavPage::Cpu, Some(graph_item)) => {
-                let mut column = widget::column::with_capacity(2)
+                let mut column = widget::column::with_capacity(3)
                     .spacing(space_m)
                     .width(Length::Fill);
 
@@ -852,6 +925,15 @@ impl Application for App {
                         canvas(Graph::new(GraphKind::Cpu, &self.graph_history).legend())
                             .height(300.0)
                             .width(Length::Fill),
+                    )
+                    .spacing(space_xxs),
+                );
+
+                // Top processes
+                column = column.push(
+                    widget::column!(
+                        widget::text::title4(fl!("processes")),
+                        self.top_processes_by(ProcessCategory::CPU, 5)
                     )
                     .spacing(space_xxs),
                 );
@@ -896,7 +978,7 @@ impl Application for App {
             (NavPage::Memory, Some(graph_item)) => {
                 let mem = &graph_item.memory;
 
-                let mut column = widget::column::with_capacity(2)
+                let mut column = widget::column::with_capacity(3)
                     .spacing(space_m)
                     .width(Length::Fill);
 
@@ -916,8 +998,8 @@ impl Application for App {
                                 widget::text::body(fl!("in-use")),
                                 widget::text::heading(format!(
                                     "{} ({:.1}%)",
-                                    humansize::format_size(mem.used - mem.cache, humansize::BINARY),
-                                    100.0 * ((mem.used - mem.cache) as f64) / (mem.total as f64)
+                                    humansize::format_size(mem.used, humansize::BINARY),
+                                    100.0 * (mem.used as f64) / (mem.total as f64)
                                 ))
                             ),
                             widget::column!(
@@ -930,11 +1012,14 @@ impl Application for App {
                             ),
                             widget::column!(
                                 widget::text::body(fl!("total-utilization")),
-                                widget::text::heading(format!(
-                                    "{} ({:.1}%)",
-                                    humansize::format_size(mem.used, humansize::BINARY),
-                                    100.0 * (mem.used as f64) / (mem.total as f64)
-                                ))
+                                widget::text::heading({
+                                    let total_used = mem.used + mem.cache;
+                                    format!(
+                                        "{} ({:.1}%)",
+                                        humansize::format_size(total_used, humansize::BINARY),
+                                        100.0 * (total_used as f64) / (mem.total as f64)
+                                    )
+                                })
                             ),
                         )
                         .spacing(space_m),
@@ -970,6 +1055,15 @@ impl Application for App {
                         canvas(Graph::new(GraphKind::Swap, &self.graph_history).legend())
                             .height(300.0)
                             .width(Length::Fill),
+                    )
+                    .spacing(space_xxs),
+                );
+
+                // Top processes
+                column = column.push(
+                    widget::column!(
+                        widget::text::title4(fl!("processes")),
+                        self.top_processes_by(ProcessCategory::Memory, 5)
                     )
                     .spacing(space_xxs),
                 );
