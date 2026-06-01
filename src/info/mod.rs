@@ -65,7 +65,7 @@ impl GraphItem {
         let disk_list = disks.list();
         let mut disk_items = Vec::with_capacity(disk_list.len());
         for disk in disk_list {
-            disk_items.push(DiskItem::new(disk, refresh));
+            disk_items.push(DiskItem::new(disk, platform, refresh));
         }
 
         let network_list = networks.list();

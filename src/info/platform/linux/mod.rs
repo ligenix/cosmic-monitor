@@ -2,10 +2,10 @@ use libc::c_uint;
 use std::{
     collections::HashMap,
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
-use sysinfo::{Components, Pid};
+use sysinfo::{Components, Disk, Pid};
 
 use super::{GpuId, GpuItem, Platform};
 
@@ -291,6 +291,24 @@ impl Platform for LinuxPlatform {
                 }
             }
         }
+    }
+
+    fn disk_name(&self, disk: &Disk) -> Option<String> {
+        let dev_path = disk.name().to_string_lossy();
+        let dev_name = dev_path.strip_prefix("/dev/")?;
+        let sys_class_path = Path::new("/sys/class/block").join(dev_name);
+        let mut sys_path = fs::canonicalize(&sys_class_path).ok()?;
+        // Partitions will be nested inside disk, which is inside device, which is inside subsystem
+        // /sys/devices/.../nvme/nvme0/nvme0n1/nvme0n1p1
+        for _depth in 0..3 {
+            let model_path = sys_path.join("model");
+            let Ok(model_data) = fs::read_to_string(&model_path) else {
+                sys_path = sys_path.parent()?.to_path_buf();
+                continue;
+            };
+            return Some(format!("{} ({})", model_data.trim(), dev_path));
+        }
+        None
     }
 
     fn gpus(&self) -> Vec<GpuItem> {
