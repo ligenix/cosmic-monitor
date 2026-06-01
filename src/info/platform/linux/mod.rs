@@ -12,6 +12,51 @@ use super::{GpuId, GpuItem, Platform};
 use fdinfo::FdInfo;
 mod fdinfo;
 
+// From distinst util crate, license LGPL 3
+fn resolve_slave(name: &str) -> Option<PathBuf> {
+    let slaves_dir = PathBuf::from(["/sys/class/block/", name, "/slaves/"].concat());
+    if !slaves_dir.exists() {
+        return Some(PathBuf::from(["/dev/", name].concat()));
+    }
+
+    let mut slaves = Vec::new();
+
+    for entry in slaves_dir.read_dir().ok()? {
+        if let Ok(entry) = entry {
+            if let Ok(name) = entry.file_name().into_string() {
+                slaves.push(name);
+            }
+        }
+    }
+
+    if slaves.len() == 1 {
+        return Some(PathBuf::from(["/dev/", &slaves[0]].concat()));
+    }
+
+    None
+}
+
+// From distinst util crate, license LGPL 3
+fn resolve_to_physical(name: &str) -> Option<PathBuf> {
+    let mut physical: Option<PathBuf> = None;
+
+    loop {
+        let physical_c = physical.clone();
+        let name = physical_c.as_ref().map_or(name, |physical| {
+            physical.file_name().unwrap().to_str().unwrap()
+        });
+        if let Some(slave) = resolve_slave(name) {
+            if physical.as_ref().map_or(true, |rec| rec != &slave) {
+                physical = Some(slave);
+                continue;
+            }
+        }
+        break;
+    }
+
+    physical
+}
+
 struct LinuxProcess {
     fdinfos: HashMap<(c_uint, c_uint), FdInfo>,
     gpu_usages: HashMap<GpuId, (f32, u64)>,
@@ -294,9 +339,12 @@ impl Platform for LinuxPlatform {
     }
 
     fn disk_name(&self, disk: &Disk) -> Option<String> {
-        let dev_path = disk.name().to_string_lossy();
-        let dev_name = dev_path.strip_prefix("/dev/")?;
-        let sys_class_path = Path::new("/sys/class/block").join(dev_name);
+        let orig_dev_path = disk.name();
+        let virt_dev_path = fs::canonicalize(&orig_dev_path).ok()?;
+        let virt_dev_name = virt_dev_path.strip_prefix("/dev/").ok()?.to_string_lossy();
+        let dev_path = resolve_to_physical(&virt_dev_name).unwrap_or(virt_dev_path);
+        let dev_name = dev_path.strip_prefix("/dev/").ok()?;
+        let sys_class_path = Path::new("/sys/class/block").join(&dev_name);
         let mut sys_path = fs::canonicalize(&sys_class_path).ok()?;
         // Partitions will be nested inside disk, which is inside device, which is inside subsystem
         // /sys/devices/.../nvme/nvme0/nvme0n1/nvme0n1p1
@@ -306,7 +354,17 @@ impl Platform for LinuxPlatform {
                 sys_path = sys_path.parent()?.to_path_buf();
                 continue;
             };
-            return Some(format!("{} ({})", model_data.trim(), dev_path));
+            let model = model_data.trim();
+            if orig_dev_path != dev_path {
+                return Some(format!(
+                    "{} ({} on {})",
+                    model,
+                    orig_dev_path.display(),
+                    dev_path.display()
+                ));
+            } else {
+                return Some(format!("{} ({})", model, dev_path.display()));
+            }
         }
         None
     }
