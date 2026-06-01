@@ -64,10 +64,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 );
                 return Ok(());
             }
-            _ => {
-                //TODO: should this throw an error?
-                log::warn!("ignored argument {:?}", arg);
-            }
+            _ => {}
         }
     }
 

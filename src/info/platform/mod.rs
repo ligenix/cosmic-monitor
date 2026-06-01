@@ -29,9 +29,13 @@ pub struct FallbackPlatform;
 
 impl Platform for FallbackPlatform {}
 
+#[allow(unreachable_code)]
 pub fn default_platform() -> Box<dyn Platform> {
     #[cfg(target_os = "linux")]
     return Box::new(linux::LinuxPlatform::new());
+
+    #[cfg(feature = "nvml")]
+    return Box::new(nvml::NvmlPlatform::new());
 
     #[allow(unreachable_code)]
     Box::new(FallbackPlatform)
