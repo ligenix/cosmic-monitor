@@ -666,11 +666,24 @@ impl App {
         let min_width = 440.0;
         let min_processes_width = 720.0;
         let content_width = size.width - (space_xl * 2) as f32;
-        let (graphs_width, side_by_side) =
-            if content_width > min_processes_width + space_s as f32 + min_width {
-                (content_width - min_processes_width - space_s as f32, true)
+        enum DashboardLayout {
+            Small,
+            Medium,
+            Large,
+        }
+        let (graphs_width, layout) =
+            if content_width > (min_processes_width + space_s as f32 + min_width) * 2.0 {
+                (
+                    content_width - (min_processes_width + space_s as f32) * 2.0,
+                    DashboardLayout::Large,
+                )
+            } else if content_width > min_processes_width + space_s as f32 + min_width {
+                (
+                    content_width - (min_processes_width + space_s as f32),
+                    DashboardLayout::Medium,
+                )
             } else {
-                (content_width, false)
+                (content_width, DashboardLayout::Small)
             };
         while cols < 4 && graphs_width / ((cols + 1) as f32) > min_width {
             cols += 1;
@@ -702,11 +715,11 @@ impl App {
         let mut list_cards = Vec::with_capacity(2);
         let mut app_count = 5;
         let mut proc_count = 5;
-        if side_by_side {
+        if matches!(layout, DashboardLayout::Medium | DashboardLayout::Large) {
             let card_height = (space_s + 176 + space_s) as f32;
             let rows_height =
                 rows as f32 * card_height + (space_s as f32) * rows.saturating_sub(1) as f32;
-            while app_count < 20 && proc_count < 20 {
+            while app_count < 50 && proc_count < 50 {
                 let list_height = |list_count: u16| -> f32 {
                     (space_s
                     + 30 /* title 4 */
@@ -717,14 +730,25 @@ impl App {
                     + 32 /* button */
                     + space_s) as f32
                 };
-                let (next_app_count, next_proc_count) = if app_count < proc_count {
+                let (mut next_app_count, next_proc_count) = if app_count < proc_count {
                     (app_count + 1, proc_count)
                 } else {
                     (app_count, proc_count + 1)
                 };
-                if list_height(next_app_count) + (space_s as f32) + list_height(next_proc_count)
-                    > rows_height.max(size.height)
-                {
+                let total_height = match layout {
+                    DashboardLayout::Large => {
+                        // Sync the list sizes since they will be side by side
+                        next_app_count = next_proc_count;
+                        list_height(next_app_count)
+                    }
+                    DashboardLayout::Medium => {
+                        list_height(next_app_count)
+                            + (space_s as f32)
+                            + list_height(next_proc_count)
+                    }
+                    DashboardLayout::Small => break,
+                };
+                if total_height > rows_height.max(size.height) {
                     break;
                 }
                 app_count = next_app_count;
@@ -749,24 +773,38 @@ impl App {
             ));
         }
 
-        let content: Element<Message> = if side_by_side {
-            // Top apps/processes as column next to graphs
-            widget::row!(
-                widget::column::with_children(list_cards)
-                    .spacing(space_s)
-                    .width(Length::Fixed(min_processes_width)),
-                column
-            )
-            .spacing(space_s)
-            .into()
-        } else {
-            // Top apps/processes as column above graphs
-            widget::column!(
-                widget::column::with_children(list_cards).spacing(space_s),
-                column
-            )
-            .spacing(space_s)
-            .into()
+        let content: Element<Message> = match layout {
+            DashboardLayout::Large => {
+                // Top apps/processes as row next to graphs
+                widget::row!(
+                    widget::row::with_children(list_cards)
+                        .spacing(space_s)
+                        .width(Length::Fixed(min_processes_width * 2.0 + space_s as f32)),
+                    column
+                )
+                .spacing(space_s)
+                .into()
+            }
+            DashboardLayout::Medium => {
+                // Top apps/processes as column next to graphs
+                widget::row!(
+                    widget::column::with_children(list_cards)
+                        .spacing(space_s)
+                        .width(Length::Fixed(min_processes_width)),
+                    column
+                )
+                .spacing(space_s)
+                .into()
+            }
+            DashboardLayout::Small => {
+                // Top apps/processes as column above graphs
+                widget::column!(
+                    widget::column::with_children(list_cards).spacing(space_s),
+                    column
+                )
+                .spacing(space_s)
+                .into()
+            }
         };
 
         widget::scrollable(
