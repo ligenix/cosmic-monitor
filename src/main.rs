@@ -662,7 +662,7 @@ impl App {
             }
         }
 
-        let mut cols = 1;
+        let card_height = (space_s + 176 + space_s) as f32;
         let min_width = 440.0;
         let min_processes_width = 720.0;
         let content_width = size.width - (space_xl * 2) as f32;
@@ -671,20 +671,22 @@ impl App {
             Medium,
             Large,
         }
-        let (graphs_width, layout) =
-            if content_width > (min_processes_width + space_s as f32 + min_width) * 2.0 {
-                (
-                    content_width - (min_processes_width + space_s as f32) * 2.0,
-                    DashboardLayout::Large,
-                )
-            } else if content_width > min_processes_width + space_s as f32 + min_width {
-                (
-                    content_width - (min_processes_width + space_s as f32),
-                    DashboardLayout::Medium,
-                )
-            } else {
-                (content_width, DashboardLayout::Small)
-            };
+        let large_width = content_width - (min_processes_width + space_s as f32) * 2.0;
+        let large_cards = (large_width / min_width).floor()
+            * (size.height / (card_height + space_s as f32)).floor();
+        // Make sure there is enough space for all cards before attempting large layout
+        let (graphs_width, layout) = if large_cards >= items.len() as f32 {
+            (large_width, DashboardLayout::Large)
+        } else if content_width > min_processes_width + space_s as f32 + min_width {
+            (
+                content_width - (min_processes_width + space_s as f32),
+                DashboardLayout::Medium,
+            )
+        } else {
+            (content_width, DashboardLayout::Small)
+        };
+
+        let mut cols = 1;
         while cols < 4 && graphs_width / ((cols + 1) as f32) > min_width {
             cols += 1;
         }
@@ -716,7 +718,6 @@ impl App {
         let mut app_count = 5;
         let mut proc_count = 5;
         if matches!(layout, DashboardLayout::Medium | DashboardLayout::Large) {
-            let card_height = (space_s + 176 + space_s) as f32;
             let rows_height =
                 rows as f32 * card_height + (space_s as f32) * rows.saturating_sub(1) as f32;
             while app_count < 50 && proc_count < 50 {
