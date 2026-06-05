@@ -52,6 +52,7 @@ impl NvmlPlatform {
             let util = device.utilization_rates()?;
 
             self.gpu_items.push(GpuItem {
+                boot_vga: false,
                 id: gpu_id,
                 name,
                 temp: Some(temp as f32),

@@ -282,6 +282,7 @@ impl Platform for LinuxPlatform {
                 };
 
                 let mut gpu_item = GpuItem {
+                    boot_vga: false,
                     id: id_opt.unwrap_or(GpuId::Other(id)),
                     name,
                     //TODO: find GPU temp
@@ -289,6 +290,10 @@ impl Platform for LinuxPlatform {
                     usage: None,
                     vram_used: None,
                     vram_total: None,
+                };
+
+                if let Ok(data) = fs::read_to_string(device_path.join("boot_vga")) {
+                    gpu_item.boot_vga = data.trim() == "1";
                 };
 
                 //TODO: log errors

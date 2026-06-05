@@ -36,7 +36,7 @@ mod config;
 use graph::{Graph, GraphKind};
 mod graph;
 
-use info::{GraphItem, ProcessCategory, ProcessItem};
+use info::{GpuId, GraphItem, ProcessCategory, ProcessItem};
 mod info;
 
 mod localize;
@@ -224,6 +224,7 @@ pub enum Message {
     None,
     AppTheme(AppTheme),
     Config(Box<Config>),
+    GpuSelect(usize),
     Graph(GraphItem),
     LaunchUrl(String),
     NavPage(NavPage),
@@ -292,6 +293,8 @@ pub struct App {
     config_handler: Option<cosmic_config::Config>,
     context_page: ContextPage,
     core: Core,
+    gpu_id_opt: Option<GpuId>,
+    gpu_names: Vec<String>,
     graph_history: VecDeque<GraphItem>,
     graph_snapshot: Option<GraphItem>,
     key_binds: HashMap<KeyBind, Action>,
@@ -308,7 +311,14 @@ impl App {
         cosmic::command::set_theme(theme)
     }
 
-    fn update_processes(&mut self) {
+    fn update_snapshot(&mut self) {
+        self.gpu_names.clear();
+        if let Some(graph_item) = &self.graph_snapshot {
+            for gpu in graph_item.gpus.iter() {
+                self.gpu_names.push(gpu.name.clone());
+            }
+        }
+
         for (list, content) in &mut [
             (&mut self.apps, &mut self.app_content),
             (&mut self.processes, &mut self.process_content),
@@ -418,7 +428,7 @@ impl App {
                     data,
                     caption,
                     process_category: Option<ProcessCategory>,
-                    nav_page: NavPage|
+                    message: Message|
          -> Element<Message> {
             let mut column = widget::column::with_capacity(7)
                 .spacing(space_xxs)
@@ -508,7 +518,7 @@ impl App {
             column = column.push(
                 widget::button::text(fl!("details"))
                     .trailing_icon(widget::icon::from_name("go-next-symbolic"))
-                    .on_press(Message::NavPage(nav_page)),
+                    .on_press(message),
             );
 
             widget::container(
@@ -550,7 +560,7 @@ impl App {
                 .map(|x| x.brand.clone())
                 .unwrap_or_default(),
             Some(ProcessCategory::CPU),
-            NavPage::Cpu,
+            Message::NavPage(NavPage::Cpu),
         ));
 
         items.push(card(
@@ -566,7 +576,7 @@ impl App {
                 humansize::format_size(graph_item.memory.total, humansize::BINARY),
             ),
             Some(ProcessCategory::Memory),
-            NavPage::Memory,
+            Message::NavPage(NavPage::Memory),
         ));
 
         let disk_io = graph_item.total_disk_io();
@@ -580,7 +590,7 @@ impl App {
             ),
             String::new(),
             Some(ProcessCategory::DiskTotal),
-            NavPage::Disk,
+            Message::NavPage(NavPage::Disk),
         ));
 
         let network_io = graph_item.total_network_io();
@@ -594,7 +604,7 @@ impl App {
             ),
             String::new(),
             None,
-            NavPage::Network,
+            Message::NavPage(NavPage::Network),
         ));
 
         for (gpu_i, gpu) in graph_item.gpus.iter().enumerate() {
@@ -609,7 +619,7 @@ impl App {
                     },
                     gpu.name.clone(),
                     Some(ProcessCategory::GpuUsage(gpu.id, Some(gpu_i))),
-                    NavPage::Gpu,
+                    Message::GpuSelect(gpu_i),
                 ));
             }
             if let Some(vram_used) = gpu.vram_used {
@@ -625,7 +635,7 @@ impl App {
                         //TODO: show vram total format!("{}", humansize::format_size(vram_total, humansize::BINARY)),
                         gpu.name.clone(),
                         Some(ProcessCategory::GpuVram(gpu.id, Some(gpu_i))),
-                        NavPage::Gpu,
+                        Message::GpuSelect(gpu_i),
                     ));
                 }
             }
@@ -726,6 +736,8 @@ impl Application for App {
             config_handler: flags.config_handler,
             context_page: ContextPage::Settings,
             core,
+            gpu_id_opt: None,
+            gpu_names: Vec::new(),
             graph_history: VecDeque::new(),
             graph_snapshot: None,
             key_binds: HashMap::new(),
@@ -793,6 +805,15 @@ impl Application for App {
                     return self.update_config();
                 }
             }
+            Message::GpuSelect(gpu_i) => {
+                self.gpu_id_opt = None;
+                if let Some(graph_item) = &self.graph_snapshot {
+                    if let Some(gpu) = graph_item.gpus.get(gpu_i) {
+                        self.gpu_id_opt = Some(gpu.id);
+                    }
+                }
+                return self.update(Message::NavPage(NavPage::Gpu));
+            }
             Message::Graph(graph_item) => {
                 self.graph_history.push_back(graph_item);
                 let now = Instant::now();
@@ -826,7 +847,7 @@ impl Application for App {
                     None
                 };
                 self.process_search = (search, regex_opt);
-                self.update_processes();
+                self.update_snapshot();
             }
             Message::ProcessSort(category) => {
                 if self.process_sort.0 == category {
@@ -835,18 +856,18 @@ impl Application for App {
                     self.process_sort.0 = category;
                     self.process_sort.1 = false;
                 }
-                self.update_processes();
+                self.update_snapshot();
             }
             Message::SeeAllProcesses(category, direction) => {
                 self.process_sort = (category, direction);
-                self.update_processes();
+                self.update_snapshot();
                 return self.update(Message::NavPage(NavPage::Processes));
             }
             Message::Snapshot(graph_item, apps, processes) => {
                 self.graph_snapshot = Some(graph_item);
                 self.apps = apps;
                 self.processes = processes;
-                self.update_processes();
+                self.update_snapshot();
             }
             Message::Surface(a) => {
                 return cosmic::task::message(cosmic::Action::Cosmic(
@@ -1131,15 +1152,30 @@ impl Application for App {
                 column.into()
             }
             (NavPage::Gpu, Some(graph_item)) => {
-                let mut column = widget::column::with_capacity(graph_item.gpus.len())
-                    .spacing(space_m)
-                    .width(Length::Fill);
-
-                for (gpu_i, gpu) in graph_item.gpus.iter().enumerate() {
-                    let mut gpu_col = widget::column::with_capacity(7).spacing(space_xxs);
-                    gpu_col = gpu_col.push(widget::text::title4(&gpu.name));
+                if let Some((gpu_i, gpu)) = graph_item
+                    .gpus
+                    .iter()
+                    .enumerate()
+                    .find(|(_, gpu)| {
+                        self.gpu_id_opt == Some(gpu.id)
+                            || (self.gpu_id_opt.is_none() && gpu.boot_vga)
+                    })
+                    .or_else(|| graph_item.gpus.first().map(|gpu| (0, gpu)))
+                {
+                    page_header = page_header
+                        .push(
+                            widget::column!(
+                                widget::divider::horizontal::default(),
+                                widget::dropdown(&self.gpu_names, Some(gpu_i), Message::GpuSelect,),
+                                widget::divider::horizontal::default(),
+                            )
+                            .spacing(space_xxs),
+                        )
+                        .push(widget::space().height(space_m));
+                    let mut column = widget::column::with_capacity(6).spacing(space_xxs);
+                    //column = column.push(widget::text::title4(&gpu.name));
                     if let Some(usage) = gpu.usage {
-                        gpu_col = gpu_col.push(
+                        column = column.push(
                             widget::row!(
                                 widget::column!(
                                     widget::text::body(fl!("utilization")),
@@ -1155,7 +1191,7 @@ impl Application for App {
                             )
                             .spacing(space_m),
                         );
-                        gpu_col = gpu_col.push(
+                        column = column.push(
                             canvas(
                                 Graph::new(GraphKind::GpuUsage(gpu.id), &self.graph_history)
                                     .legend(),
@@ -1165,7 +1201,7 @@ impl Application for App {
                         );
 
                         // Top processes
-                        gpu_col = gpu_col.push(self.top_processes_by(
+                        column = column.push(self.top_processes_by(
                             ProcessCategory::GpuUsage(gpu.id, Some(gpu_i)),
                             false,
                             5,
@@ -1173,7 +1209,7 @@ impl Application for App {
                     }
                     if let Some(vram_used) = gpu.vram_used {
                         if let Some(vram_total) = gpu.vram_total {
-                            gpu_col = gpu_col.push(
+                            column = column.push(
                                 widget::row!(
                                     widget::column!(
                                         widget::text::body(fl!("capacity")),
@@ -1193,7 +1229,7 @@ impl Application for App {
                                 )
                                 .spacing(space_m),
                             );
-                            gpu_col = gpu_col.push(
+                            column = column.push(
                                 canvas(
                                     Graph::new(GraphKind::GpuVram(gpu.id), &self.graph_history)
                                         .legend(),
@@ -1203,17 +1239,17 @@ impl Application for App {
                             );
 
                             // Top processes
-                            gpu_col = gpu_col.push(self.top_processes_by(
+                            column = column.push(self.top_processes_by(
                                 ProcessCategory::GpuVram(gpu.id, Some(gpu_i)),
                                 false,
                                 5,
                             ));
                         }
                     }
-                    column = column.push(gpu_col);
+                    column.into()
+                } else {
+                    widget::text::body(fl!("no-gpus")).into()
                 }
-
-                column.into()
             }
             (NavPage::Disk, Some(graph_item)) => {
                 let mut column = widget::column::with_capacity(2 + graph_item.disks.len() * 3)

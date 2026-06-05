@@ -29,6 +29,7 @@ impl GpuId {
 
 #[derive(Clone, Debug)]
 pub struct GpuItem {
+    pub boot_vga: bool,
     pub id: GpuId,
     pub name: String,
     pub usage: Option<f32>,

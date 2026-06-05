@@ -22,6 +22,8 @@ app = App
 name = Name
 disk-read = Disk read
 disk-write = Disk write
+gpu-index = GPU {$index}
+gpu-vram-index = GPU {$index} VRAM
 pid = PID
 priority = Priority
 search-processes = Search by name, PID, or username
@@ -43,6 +45,7 @@ swap-usage = Swap usage
 total-utilization = Total utilization
 
 ## GPU
+no-gpus = No supported GPUs found.
 vram = VRAM
 
 ## Disk
