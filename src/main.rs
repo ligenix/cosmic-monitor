@@ -122,6 +122,38 @@ Options:
     );
 }
 
+fn table_row<'a>(item: &'a ProcessItem, categories: &[ProcessCategory]) -> Element<'a, Message> {
+    let cosmic_theme::Spacing { space_xxs, .. } = theme::active().cosmic().spacing;
+
+    let mut row = widget::row::with_capacity(categories.len()).align_y(Alignment::Center);
+    for &category in categories {
+        let mut cat_row = widget::row::with_capacity(2)
+            .align_y(Alignment::Center)
+            .spacing(space_xxs);
+        if let Some(icon) = item.get_icon(category) {
+            cat_row = cat_row.push(icon);
+        }
+        let text = item.text(category);
+        if !text.is_empty() {
+            cat_row = cat_row.push(
+                widget::text(text)
+                    .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
+                    //TODO: should basic shaping only be used on some columns?
+                    .shaping(Shaping::Basic),
+            );
+        }
+        row = row.push(
+            widget::container(cat_row)
+                .align_x(category.data_align())
+                .align_y(Alignment::Center)
+                .padding([0, 8])
+                .height(Length::Fixed(40.0))
+                .width(category.width()),
+        );
+    }
+    row.into()
+}
+
 #[derive(Clone, Debug)]
 pub struct Flags {
     config_handler: Option<cosmic_config::Config>,
@@ -344,36 +376,10 @@ impl App {
             .iter()
             .k_smallest_by(count, |a, b| a.compare(b, sort_category))
         {
-            let mut row = widget::row::with_capacity(categories.len()).align_y(Alignment::Center);
-            for &category in categories {
-                let mut cat_row = widget::row::with_capacity(2)
-                    .align_y(Alignment::Center)
-                    .spacing(space_xxs);
-                if let Some(icon) = item.get_icon(category) {
-                    cat_row = cat_row.push(icon);
-                }
-                let text = item.text(category);
-                if !text.is_empty() {
-                    cat_row = cat_row.push(
-                        widget::text(text)
-                            .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
-                            //TODO: should basic shaping only be used on some columns?
-                            .shaping(Shaping::Basic),
-                    );
-                }
-                row = row.push(
-                    widget::container(cat_row)
-                        .align_x(category.data_align())
-                        .align_y(Alignment::Center)
-                        .padding([0, 8])
-                        .height(Length::Fixed(40.0))
-                        .width(category.width()),
-                );
-            }
             column = column.push(
                 widget::column::with_capacity(2)
                     .push(widget::divider::horizontal::default())
-                    .push(row),
+                    .push(table_row(item, categories)),
             );
         }
         column = column.push(widget::divider::horizontal::default());
@@ -415,24 +421,36 @@ impl App {
 
             if let Some(sort_category) = process_category {
                 // The compare function is backwards, so this uses min_by
-                if let Some(process) = self
+                if let Some(item) = self
                     .processes
                     .iter()
                     .min_by(|a, b| a.compare(b, sort_category))
                 {
-                    let mut row = widget::row::with_capacity(2).align_y(Alignment::Center);
-                    for &category in &[ProcessCategory::Name, sort_category] {
-                        row = row.push(
+                    let mut row = widget::row::with_capacity(3)
+                        .align_y(Alignment::Center)
+                        .spacing(space_xxs);
+                    if let Some(icon) = item.get_icon(ProcessCategory::App) {
+                        row = row.push(icon);
+                    }
+                    row = row
+                        .push(
                             widget::container(
-                                widget::text(process.text(category))
+                                widget::text(&item.name)
                                     .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
                                     .shaping(Shaping::Basic),
                             )
-                            .align_x(category.data_align())
+                            .align_x(Alignment::Start)
                             .align_y(Alignment::Center)
-                            .width(category.width()),
+                            .width(Length::Fill),
+                        )
+                        .push(
+                            widget::container(
+                                widget::text(item.text(sort_category)).shaping(Shaping::Basic),
+                            )
+                            .align_x(Alignment::End)
+                            .align_y(Alignment::Center)
+                            .width(Length::Shrink),
                         );
-                    }
                     column = column
                         .push(widget::divider::horizontal::default())
                         .push(row)
@@ -936,36 +954,9 @@ impl Application for App {
                 }
                 page_header = page_header.push(header);
                 iced::widget::List::new(content, move |_i, item| {
-                    let mut row =
-                        widget::row::with_capacity(categories.len()).align_y(Alignment::Center);
-                    for &category in categories {
-                        let mut cat_row = widget::row::with_capacity(2)
-                            .align_y(Alignment::Center)
-                            .spacing(space_xxs);
-                        if let Some(icon) = item.get_icon(category) {
-                            cat_row = cat_row.push(icon);
-                        }
-                        let text = item.text(category);
-                        if !text.is_empty() {
-                            cat_row = cat_row.push(
-                                widget::text(text)
-                                    .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
-                                    //TODO: should basic shaping only be used on some columns?
-                                    .shaping(Shaping::Basic),
-                            );
-                        }
-                        row = row.push(
-                            widget::container(cat_row)
-                                .align_x(category.data_align())
-                                .align_y(Alignment::Center)
-                                .padding([0, 8])
-                                .height(Length::Fixed(40.0))
-                                .width(category.width()),
-                        );
-                    }
                     widget::column::with_capacity(2)
                         .push(widget::divider::horizontal::default())
-                        .push(row)
+                        .push(table_row(item, categories))
                         .into()
                 })
                 .into()
