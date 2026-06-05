@@ -21,6 +21,7 @@ use cosmic::{
     },
 };
 use itertools::Itertools;
+use regex::{Regex, RegexBuilder};
 use std::{
     any::TypeId,
     collections::{HashMap, VecDeque},
@@ -161,9 +162,10 @@ pub enum Message {
     Graph(GraphItem),
     LaunchUrl(String),
     NavPage(NavPage),
+    ProcessSearch(String),
     ProcessSort(ProcessCategory),
     SeeAllProcesses(ProcessCategory, bool),
-    Snapshot(GraphItem, Vec<ProcessItem>),
+    Snapshot(GraphItem, Vec<ProcessItem>, Vec<ProcessItem>),
     Surface(surface::Action),
     SystemThemeChange,
     ToggleContextPage(ContextPage),
@@ -178,6 +180,7 @@ pub enum ContextPage {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NavPage {
     Dashboard,
+    Applications,
     Processes,
     Cpu,
     Memory,
@@ -190,6 +193,7 @@ impl NavPage {
     pub fn all() -> &'static [Self] {
         &[
             Self::Dashboard,
+            Self::Applications,
             Self::Processes,
             Self::Cpu,
             Self::Memory,
@@ -202,6 +206,7 @@ impl NavPage {
     pub fn title(&self) -> String {
         match self {
             Self::Dashboard => fl!("dashboard"),
+            Self::Applications => fl!("applications"),
             Self::Processes => fl!("processes"),
             Self::Cpu => fl!("cpu"),
             Self::Memory => fl!("memory"),
@@ -216,6 +221,8 @@ impl NavPage {
 pub struct App {
     about: About,
     app_themes: Vec<String>,
+    apps: Vec<ProcessItem>,
+    app_content: iced::widget::list::Content<ProcessItem>,
     config: Config,
     config_handler: Option<cosmic_config::Config>,
     context_page: ContextPage,
@@ -226,6 +233,7 @@ pub struct App {
     nav_model: segmented_button::SingleSelectModel,
     processes: Vec<ProcessItem>,
     process_content: iced::widget::list::Content<ProcessItem>,
+    process_search: (String, Option<Regex>),
     process_sort: (ProcessCategory, bool),
 }
 
@@ -236,25 +244,35 @@ impl App {
     }
 
     fn update_processes(&mut self) {
-        self.processes.sort_by(|a, b| {
-            if self.process_sort.1 {
-                b.compare(a, self.process_sort.0)
-            } else {
-                a.compare(b, self.process_sort.0)
-            }
-        });
+        for (list, content) in &mut [
+            (&mut self.apps, &mut self.app_content),
+            (&mut self.processes, &mut self.process_content),
+        ] {
+            list.sort_by(|a, b| {
+                if self.process_sort.1 {
+                    b.compare(a, self.process_sort.0)
+                } else {
+                    a.compare(b, self.process_sort.0)
+                }
+            });
 
-        let mut i = 0;
-        for process in self.processes.iter() {
-            if i >= self.process_content.len() {
-                self.process_content.push(process.clone());
-            } else if self.process_content.get(i) != Some(&process) {
-                *self.process_content.get_mut(i).unwrap() = process.clone();
+            let mut i = 0;
+            for item in list.iter() {
+                if let Some(regex) = &self.process_search.1 {
+                    if !item.matches(&regex) {
+                        continue;
+                    }
+                }
+                if i >= content.len() {
+                    content.push(item.clone());
+                } else if content.get(i) != Some(&item) {
+                    *content.get_mut(i).unwrap() = item.clone();
+                }
+                i += 1;
             }
-            i += 1;
-        }
-        while i < self.process_content.len() {
-            self.process_content.remove(i);
+            while i < content.len() {
+                content.remove(i);
+            }
         }
     }
 
@@ -661,6 +679,8 @@ impl Application for App {
         let mut app = Self {
             about,
             app_themes,
+            apps: Vec::new(),
+            app_content: iced::widget::list::Content::new(),
             config: flags.config,
             config_handler: flags.config_handler,
             context_page: ContextPage::Settings,
@@ -671,7 +691,8 @@ impl Application for App {
             nav_model: nav_model.build(),
             processes: Vec::new(),
             process_content: iced::widget::list::Content::new(),
-            process_sort: (ProcessCategory::CPU, false),
+            process_search: (String::new(), None),
+            process_sort: (ProcessCategory::default(), false),
         };
 
         let command = app.update_config();
@@ -753,6 +774,18 @@ impl Application for App {
                     return self.on_nav_select(id);
                 }
             }
+            Message::ProcessSearch(search) => {
+                let regex_opt = if !search.is_empty() {
+                    RegexBuilder::new(&regex::escape(&search))
+                        .case_insensitive(true)
+                        .build()
+                        .ok()
+                } else {
+                    None
+                };
+                self.process_search = (search, regex_opt);
+                self.update_processes();
+            }
             Message::ProcessSort(category) => {
                 if self.process_sort.0 == category {
                     self.process_sort.1 = !self.process_sort.1
@@ -767,8 +800,9 @@ impl Application for App {
                 self.update_processes();
                 return self.update(Message::NavPage(NavPage::Processes));
             }
-            Message::Snapshot(graph_item, processes) => {
+            Message::Snapshot(graph_item, apps, processes) => {
                 self.graph_snapshot = Some(graph_item);
+                self.apps = apps;
                 self.processes = processes;
                 self.update_processes();
             }
@@ -830,7 +864,7 @@ impl Application for App {
             .nav_model
             .active_data()
             .map_or(NavPage::Dashboard, |x| *x);
-        let mut page_header = widget::column::with_capacity(4).padding([0, space_xl]);
+        let mut page_header = widget::column::with_capacity(6).padding([0, space_xl]);
         if !matches!(nav_page, NavPage::Dashboard) {
             page_header = page_header
                 .push(
@@ -847,7 +881,19 @@ impl Application for App {
                     .width(Length::Fill)
                     .into()
             }
-            (NavPage::Processes, _) => {
+            (NavPage::Applications | NavPage::Processes, _) => {
+                page_header = page_header
+                    .push(
+                        widget::container(
+                            widget::search_input(fl!("search-processes"), &self.process_search.0)
+                                .on_input(Message::ProcessSearch)
+                                .width(360.0),
+                        )
+                        .align_x(Alignment::Center)
+                        .width(Length::Fill),
+                    )
+                    .push(widget::space().height(space_m));
+
                 //TODO: table is too slow, this uses list to emulate table
                 let categories = ProcessCategory::all();
                 let mut header =
@@ -873,21 +919,36 @@ impl Application for App {
                         .push(widget::mouse_area(row).on_press(Message::ProcessSort(category)));
                 }
                 page_header = page_header.push(header);
-                iced::widget::List::new(&self.process_content, move |_i, item| {
+                let content = match nav_page {
+                    NavPage::Applications => &self.app_content,
+                    _ => &self.process_content,
+                };
+                iced::widget::List::new(content, move |_i, item| {
                     let mut row =
                         widget::row::with_capacity(categories.len()).align_y(Alignment::Center);
                     for &category in categories {
-                        row = row.push(
-                            widget::container(
-                                widget::text(item.text(category))
-                                    .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
-                                    .shaping(Shaping::Basic),
-                            )
-                            .align_x(category.data_align())
+                        let mut cat_row = widget::row::with_capacity(2)
                             .align_y(Alignment::Center)
-                            .padding([0, 8])
-                            .height(Length::Fixed(40.0))
-                            .width(category.width()),
+                            .spacing(space_xxs);
+                        if let Some(icon) = item.get_icon(category) {
+                            cat_row = cat_row.push(icon);
+                        }
+                        let text = item.text(category);
+                        if !text.is_empty() {
+                            cat_row = cat_row.push(
+                                widget::text(text)
+                                    .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
+                                    //TODO: should basic shaping only be used on some columns?
+                                    .shaping(Shaping::Basic),
+                            );
+                        }
+                        row = row.push(
+                            widget::container(cat_row)
+                                .align_x(category.data_align())
+                                .align_y(Alignment::Center)
+                                .padding([0, 8])
+                                .height(Length::Fixed(40.0))
+                                .width(category.width()),
                         );
                     }
                     widget::column::with_capacity(2)

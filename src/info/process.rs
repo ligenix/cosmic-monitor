@@ -1,23 +1,52 @@
-use std::{borrow::Cow, cmp::Ordering, collections::HashMap, fmt, time::Duration};
+use std::{
+    borrow::Cow, cmp::Ordering, collections::HashMap, fmt, path::Path, sync::Arc, time::Duration,
+};
 
 use cosmic::{
     iced::{Alignment, Length},
     widget::{
-        Icon,
+        self, Icon,
         table::{ItemCategory, ItemInterface},
     },
 };
-use sysinfo::{Pid, Process, Users};
+use humansize::{BINARY, DECIMAL, format_size};
+use regex::Regex;
+use sysinfo::{Pid, Process, System, Users};
 
 use super::{GpuId, Platform};
-use crate::fl;
+use crate::{fl, info::AppEntry};
+
+fn best_name(p: &Process) -> String {
+    // Name is truncated on Linux, try to fill in using cmdline or exe
+    let name = p.name().to_string_lossy().to_string();
+    if let Some(cmd) = p
+        .cmd()
+        .get(0)
+        .map(Path::new)
+        .and_then(|x| x.file_name())
+        .and_then(|x| x.to_str())
+    {
+        if cmd.starts_with(&name) {
+            return cmd.to_string();
+        }
+    }
+    if let Some(exe_name) = p.exe().and_then(|x| x.file_name()).and_then(|x| x.to_str()) {
+        if exe_name.starts_with(&name) {
+            return exe_name.to_string();
+        } else {
+            return format!("{} ({})", name, exe_name);
+        }
+    }
+    name
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
 pub enum ProcessCategory {
-    #[default]
+    App,
     Name,
     User,
     PID,
+    #[default]
     CPU,
     Memory,
     GpuUsage(GpuId),
@@ -33,6 +62,7 @@ pub enum ProcessCategory {
 impl ProcessCategory {
     pub fn all() -> &'static [Self] {
         &[
+            Self::App,
             Self::Name,
             Self::User,
             Self::PID,
@@ -49,7 +79,8 @@ impl ProcessCategory {
     pub fn data_align(&self) -> Alignment {
         match self {
             Self::Name | Self::User | Self::Priority => Alignment::Start,
-            Self::PID
+            Self::App
+            | Self::PID
             | Self::CPU
             | Self::Memory
             | Self::GpuUsage(_)
@@ -65,22 +96,22 @@ impl ProcessCategory {
 
 impl fmt::Display for ProcessCategory {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        //TODO: translate
         write!(
             f,
             "{}",
             match self {
-                Self::Name => "Name".to_string(),
-                Self::User => "User".to_string(),
-                Self::PID => "PID".to_string(),
+                Self::App => fl!("app"),
+                Self::Name => fl!("name"),
+                Self::User => fl!("user"),
+                Self::PID => fl!("pid"),
                 Self::CPU => fl!("cpu"),
                 Self::Memory => fl!("memory"),
                 Self::GpuUsage(_) | Self::GpuUsageTotal => fl!("gpu"),
                 Self::GpuVram(_) | Self::GpuVramTotal => fl!("gpu-vram"),
-                Self::DiskRead => "Disk Read".to_string(),
-                Self::DiskWrite => "Disk Write".to_string(),
+                Self::DiskRead => fl!("disk-read"),
+                Self::DiskWrite => fl!("disk-write"),
                 Self::DiskTotal => fl!("disk"),
-                Self::Priority => "Priority".to_string(),
+                Self::Priority => fl!("priority"),
             }
         )
     }
@@ -89,6 +120,7 @@ impl fmt::Display for ProcessCategory {
 impl ItemCategory for ProcessCategory {
     fn width(&self) -> Length {
         match self {
+            Self::App => Length::Fixed(64.0),
             Self::Name => Length::Fill,
             Self::User | Self::PID | Self::Priority => Length::Fixed(96.0),
             Self::CPU | Self::GpuUsage(_) | Self::GpuUsageTotal => Length::Fixed(64.0),
@@ -102,100 +134,77 @@ impl ItemCategory for ProcessCategory {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProcessGpuInfo {
     pub usage: Option<u32>,
-    pub usage_str: String,
     pub vram: Option<u64>,
-    pub vram_str: String,
+}
+
+impl ProcessGpuInfo {
+    pub fn add(&mut self, other: &Self) {
+        if let Some(usage) = other.usage {
+            self.usage = Some(self.usage.map_or(usage, |x| x + usage));
+        }
+        if let Some(vram) = other.vram {
+            self.vram = Some(self.vram.map_or(vram, |x| x + vram));
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProcessItem {
+    pub app: Option<(Pid, Arc<AppEntry>)>,
     pub cpu_usage: u32,
-    pub cpu_usage_str: String,
     pub disk_read: u64,
-    pub disk_read_str: String,
     pub disk_write: u64,
-    pub disk_write_str: String,
     pub disk_total: u64,
-    pub disk_total_str: String,
     pub gpu_usages: HashMap<GpuId, ProcessGpuInfo>,
     pub gpu_total: ProcessGpuInfo,
     pub memory: u64,
-    pub memory_str: String,
     pub name: String,
+    pub parent: Option<Pid>,
     pub pid: Pid,
-    pub pid_str: String,
     pub priority: Option<i32>,
     pub username: String,
+    pub strings: HashMap<ProcessCategory, String>,
 }
 
 impl ProcessItem {
     pub fn new(
         p: &Process,
-        cpu_len: usize,
+        sys: &System,
         platform: &Box<dyn Platform>,
         users: &Users,
         refresh: Duration,
     ) -> Self {
-        let cpu_usage = ((p.cpu_usage() / (cpu_len as f32)) * 10.0) as u32;
-        let cpu_usage_str = format!("{}.{}%", cpu_usage / 10, cpu_usage % 10);
+        let app = platform.process_app(p, sys);
+
+        let cpu_usage = ((p.cpu_usage() / (sys.cpus().len() as f32)) * 10.0) as u32;
 
         let disk_usage = p.disk_usage();
         let disk_read = disk_usage.read_bytes / refresh.as_secs();
-        let disk_read_str = format!(
-            "{}/s",
-            humansize::format_size(disk_read, humansize::DECIMAL)
-        );
         let disk_write = disk_usage.written_bytes / refresh.as_secs();
-        let disk_write_str = format!(
-            "{}/s",
-            humansize::format_size(disk_write, humansize::DECIMAL)
-        );
         let disk_total = disk_read + disk_write;
-        let disk_total_str = format!(
-            "{}/s",
-            humansize::format_size(disk_total, humansize::DECIMAL)
-        );
 
         let pid = p.pid();
-        let pid_str = pid.to_string();
 
         let mut gpu_total = ProcessGpuInfo {
             usage: None,
-            usage_str: String::new(),
             vram: None,
-            vram_str: String::new(),
         };
         let mut gpu_usages = HashMap::new();
         for (gpu_id, (usage_float, vram)) in platform.process_gpu_usage(pid) {
-            let usage = (usage_float * 10.0) as u32;
-            let usage_str = format!("{}.{}%", usage / 10, usage % 10);
-            gpu_total.usage = Some(gpu_total.usage.map_or(usage, |x| x + usage));
-            let vram_str = format!("{}", humansize::format_size(vram, humansize::BINARY));
-            gpu_total.vram = Some(gpu_total.vram.map_or(vram, |x| x + vram));
-            gpu_usages.insert(
-                gpu_id,
-                ProcessGpuInfo {
-                    usage: Some(usage),
-                    usage_str,
-                    vram: Some(vram),
-                    vram_str,
-                },
-            );
+            let info = ProcessGpuInfo {
+                usage: Some((usage_float * 10.0) as u32),
+                vram: Some(vram),
+            };
+            gpu_total.add(&info);
+            gpu_usages.insert(gpu_id, info);
         }
-        gpu_total.usage_str = gpu_total
-            .usage
-            .map(|x| format!("{}.{}%", x / 10, x % 10))
-            .unwrap_or_default();
-        gpu_total.vram_str = gpu_total
-            .vram
-            .map(|x| format!("{}", humansize::format_size(x, humansize::BINARY)))
-            .unwrap_or_default();
 
         let memory = p.memory();
-        let memory_str = format!("{}", humansize::format_size(memory, humansize::BINARY));
+
+        let name = best_name(&p);
 
         let mut priority = None;
 
@@ -219,71 +228,133 @@ impl ProcessItem {
             None => String::new(),
         };
 
-        Self {
+        let mut this = Self {
+            app,
             cpu_usage,
-            cpu_usage_str,
             disk_read,
-            disk_read_str,
             disk_write,
-            disk_write_str,
             disk_total,
-            disk_total_str,
             gpu_usages,
             gpu_total,
             memory,
-            memory_str,
-            name: p.name().to_string_lossy().into(),
+            name,
+            parent: p.parent(),
             pid,
-            pid_str,
             priority,
             username,
+            strings: HashMap::new(),
+        };
+        this.generate_strings();
+        this
+    }
+
+    pub fn generate_strings(&mut self) {
+        self.strings.insert(
+            ProcessCategory::CPU,
+            format!("{}.{}%", self.cpu_usage / 10, self.cpu_usage % 10),
+        );
+        self.strings.insert(
+            ProcessCategory::DiskRead,
+            format!("{}/s", format_size(self.disk_read, DECIMAL)),
+        );
+        self.strings.insert(
+            ProcessCategory::DiskWrite,
+            format!("{}/s", format_size(self.disk_write, DECIMAL)),
+        );
+        self.strings.insert(
+            ProcessCategory::DiskTotal,
+            format!("{}/s", format_size(self.disk_total, DECIMAL)),
+        );
+        for (gpu_id, info) in self.gpu_usages.iter() {
+            if let Some(usage) = info.usage {
+                self.strings.insert(
+                    ProcessCategory::GpuUsage(*gpu_id),
+                    format!("{}.{}%", usage / 10, usage % 10),
+                );
+            }
+            if let Some(vram) = info.vram {
+                self.strings.insert(
+                    ProcessCategory::GpuVram(*gpu_id),
+                    format!("{}", format_size(vram, BINARY)),
+                );
+            }
         }
+        if let Some(usage) = self.gpu_total.usage {
+            self.strings.insert(
+                ProcessCategory::GpuUsageTotal,
+                format!("{}.{}%", usage / 10, usage % 10),
+            );
+        }
+        if let Some(vram) = self.gpu_total.vram {
+            self.strings.insert(
+                ProcessCategory::GpuVramTotal,
+                format!("{}", format_size(vram, BINARY)),
+            );
+        }
+        self.strings.insert(
+            ProcessCategory::Memory,
+            format!("{}", format_size(self.memory, BINARY)),
+        );
+        self.strings
+            .insert(ProcessCategory::PID, self.pid.to_string());
+        //TODO: translate
+        self.strings.insert(
+            ProcessCategory::Priority,
+            self.priority
+                .map_or("N/A", |x| {
+                    if x < -7 {
+                        "Very high"
+                    } else if x < -2 {
+                        "High"
+                    } else if x < 3 {
+                        "Normal"
+                    } else if x < 7 {
+                        "Low"
+                    } else {
+                        "Very low"
+                    }
+                })
+                .to_string(),
+        );
+    }
+
+    pub fn matches(&self, regex: &Regex) -> bool {
+        regex.is_match(&self.name)
+            || regex.is_match(&self.username)
+            || self
+                .strings
+                .get(&ProcessCategory::PID)
+                .map_or(false, |x| regex.is_match(x))
     }
 
     // Like get_text but without allocation
     pub fn text(&self, category: ProcessCategory) -> &str {
         match category {
+            // Only the icon is shown
+            ProcessCategory::App => "",
             ProcessCategory::Name => &self.name,
             ProcessCategory::User => &self.username,
-            ProcessCategory::PID => &self.pid_str,
-            ProcessCategory::CPU => &self.cpu_usage_str,
-            ProcessCategory::Memory => &self.memory_str,
-            ProcessCategory::GpuUsage(gpu_id) => &self
-                .gpu_usages
-                .get(&gpu_id)
-                .map(|x| x.usage_str.as_str())
-                .unwrap_or_default(),
-            ProcessCategory::GpuUsageTotal => &self.gpu_total.usage_str,
-            ProcessCategory::GpuVram(gpu_id) => &self
-                .gpu_usages
-                .get(&gpu_id)
-                .map(|x| x.vram_str.as_str())
-                .unwrap_or_default(),
-            ProcessCategory::GpuVramTotal => &self.gpu_total.vram_str,
-            ProcessCategory::DiskRead => &self.disk_read_str,
-            ProcessCategory::DiskWrite => &self.disk_write_str,
-            ProcessCategory::DiskTotal => &self.disk_total_str,
-            //TODO: translate
-            ProcessCategory::Priority => self.priority.map_or("N/A", |x| {
-                if x < -7 {
-                    "Very high"
-                } else if x < -2 {
-                    "High"
-                } else if x < 3 {
-                    "Normal"
-                } else if x < 7 {
-                    "Low"
+            _ => {
+                //TODO: only generate strings when necessary?
+                if let Some(string) = self.strings.get(&category) {
+                    string.as_str()
                 } else {
-                    "Very low"
+                    ""
                 }
-            }),
+            }
         }
     }
 }
 
 impl ItemInterface<ProcessCategory> for ProcessItem {
-    fn get_icon(&self, _category: ProcessCategory) -> Option<Icon> {
-        None
+    fn get_icon(&self, category: ProcessCategory) -> Option<Icon> {
+        match category {
+            ProcessCategory::App => {
+                let icon = self.app.as_ref()?.1.icon.as_ref()?.as_str();
+                Some(widget::icon::from_name(icon).size(24).icon())
+            }
+            _ => None,
+        }
     }
 
     //TODO: Use Cow<'a, str> instead so borrows of strings work
@@ -293,6 +364,16 @@ impl ItemInterface<ProcessCategory> for ProcessItem {
 
     fn compare(&self, other: &Self, category: ProcessCategory) -> Ordering {
         match category {
+            ProcessCategory::App => match (
+                self.app.as_ref().and_then(|x| x.1.name.as_ref()),
+                other.app.as_ref().and_then(|x| x.1.name.as_ref()),
+            ) {
+                (Some(name), Some(other_name)) => name.cmp(&other_name),
+                // Sort some name above no name
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => Ordering::Equal,
+            },
             ProcessCategory::Name => self.name.cmp(&other.name),
             ProcessCategory::User => self.username.cmp(&other.username),
             ProcessCategory::PID => self.pid.cmp(&other.pid),

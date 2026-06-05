@@ -1,13 +1,15 @@
+use freedesktop_desktop_entry::{DesktopEntry, Iter, default_paths, get_languages_from_env};
 use libc::c_uint;
 use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
+    sync::Arc,
     time::{Duration, Instant},
 };
-use sysinfo::{Components, Disk, Pid};
+use sysinfo::{Components, Disk, Pid, Process, System};
 
-use super::{GpuId, GpuItem, Platform};
+use super::{AppEntry, GpuId, GpuItem, Platform};
 
 use fdinfo::FdInfo;
 mod fdinfo;
@@ -119,6 +121,7 @@ impl LinuxProcess {
 
 pub struct LinuxPlatform {
     amdgpu_ids: HashMap<(u16, u8), String>,
+    app_entries: Vec<Arc<AppEntry>>,
     gpu_items: Vec<GpuItem>,
     nvml: Box<dyn Platform>,
     processes: HashMap<Pid, LinuxProcess>,
@@ -148,8 +151,34 @@ impl LinuxPlatform {
                 amdgpu_ids.insert((id, rev), name.to_string());
             }
         }
+
+        //TODO: use this on all Unix-like systems
+        //TODO: refresh on changes
+        let locales = get_languages_from_env();
+        let mut app_entries = Vec::new();
+        for app in Iter::new(default_paths())
+            .filter_map(|p| DesktopEntry::from_path(p, Some(&locales)).ok())
+        {
+            let Ok(args) = app.parse_exec() else { continue };
+            let id = app.id().to_string();
+            let mut icon = app.icon().map(|x| x.to_string());
+
+            // Fixup for firefox user app icon
+            if icon.is_none() && id.starts_with("userapp-Firefox-") {
+                icon = Some("firefox".to_string());
+            }
+
+            app_entries.push(Arc::new(AppEntry {
+                id,
+                icon,
+                name: app.full_name(&locales).map(|x| x.to_string()),
+                args,
+            }));
+        }
+
         Self {
             amdgpu_ids,
+            app_entries,
             gpu_items: Vec::new(),
             #[cfg(feature = "nvml")]
             nvml: Box::new(super::nvml::NvmlPlatform::new()),
@@ -184,7 +213,7 @@ impl Platform for LinuxPlatform {
                         .update(self.version, &self.nvml)
                 }
             }
-            self.processes.retain(|_k, v| v.version == self.version)
+            self.processes.retain(|_k, v| v.version == self.version);
         }
 
         self.gpu_items.clear();
@@ -371,6 +400,28 @@ impl Platform for LinuxPlatform {
 
     fn gpus(&self) -> Vec<GpuItem> {
         self.gpu_items.clone()
+    }
+
+    fn process_app<'a>(
+        &self,
+        mut process: &'a Process,
+        sys: &'a System,
+    ) -> Option<(Pid, Arc<AppEntry>)> {
+        // This loops to look for any parent processes that have an associated app, as well
+        //TODO: maximum depth for parent app search?
+        loop {
+            let proc_args = process.cmd();
+            let proc_cmd = proc_args.get(0).and_then(|x| x.to_str())?;
+            let proc_exe = process.exe().and_then(|x| x.to_str())?;
+            for app in self.app_entries.iter() {
+                let Some(cmd) = app.args.get(0) else { continue };
+                if proc_cmd == cmd || proc_exe == cmd {
+                    return Some((process.pid(), app.clone()));
+                }
+            }
+            let parent = process.parent()?;
+            process = sys.process(parent)?;
+        }
     }
 
     fn process_gpu_usage(&self, pid: Pid) -> HashMap<GpuId, (f32, u64)> {

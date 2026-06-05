@@ -5,6 +5,7 @@ see-all-processes = See all processes
 
 # Nav Pages
 dashboard = Dashboard
+applications = Applications
 processes = Processes
 cpu = CPU
 memory = Memory
@@ -15,6 +16,16 @@ network = Network
 ## Dashboard
 details = Details
 gpu-vram = GPU VRAM
+
+## Processes
+app = App
+name = Name
+disk-read = Disk read
+disk-write = Disk write
+pid = PID
+priority = Priority
+search-processes = Search by name, PID, or username
+user = User
 
 ## CPU
 overall-utilization = Overall utilization

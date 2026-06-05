@@ -16,6 +16,7 @@ log = "0.4"
 open = "5.3.2"
 nvml-wrapper = { version = "0.12", optional = true }
 paste = "1"
+regex = "1"
 serde = { version = "1", features = ["serde_derive"] }
 sysinfo = { git = "https://github.com/jackpot51/sysinfo.git", branch = "redox-0.39" }
 tokio = { version = "1", features = ["sync"] }
@@ -29,6 +30,7 @@ icu = { version = "2.1.1", features = ["compiled_data"] }
 rust-embed = "8"
 
 [target.'cfg(unix)'.dependencies]
+freedesktop-desktop-entry = { version = "0.8" }
 rustix = { version = "1", features = ["process"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

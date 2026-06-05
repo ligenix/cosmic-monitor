@@ -3,6 +3,7 @@ use cosmic::iced::{
     stream,
 };
 use std::{
+    collections::HashMap,
     sync::{Arc, RwLock},
     thread,
     time::{Duration, Instant},
@@ -14,6 +15,9 @@ use sysinfo::{
 use tokio::sync::mpsc;
 
 use crate::Message;
+
+mod app;
+pub use self::app::*;
 
 mod cpu;
 pub use self::cpu::*;
@@ -216,8 +220,10 @@ pub fn worker() -> impl Stream<Item = Message> {
                         .with_memory(MemoryRefreshKind::nothing().with_ram().with_swap())
                         .with_processes(
                             ProcessRefreshKind::nothing()
+                                .with_cmd(UpdateKind::OnlyIfNotSet)
                                 .with_cpu()
                                 .with_disk_usage()
+                                .with_exe(UpdateKind::OnlyIfNotSet)
                                 .with_memory()
                                 .with_user(UpdateKind::OnlyIfNotSet),
                         ),
@@ -242,23 +248,56 @@ pub fn worker() -> impl Stream<Item = Message> {
                         processes_refresh,
                     );
 
-                    let cpu_len = sys.cpus().len();
                     let processes = sys.processes();
+                    let mut apps = HashMap::new();
                     let mut process_items = Vec::with_capacity(processes.len());
                     for (_pid, process) in processes.iter() {
                         // Do not show threads
                         if process.thread_kind().is_some() {
                             continue;
                         }
-                        process_items.push(ProcessItem::new(
-                            process,
-                            cpu_len,
-                            &platform,
-                            &users,
-                            processes_refresh,
-                        ));
+                        let item =
+                            ProcessItem::new(process, &sys, &platform, &users, processes_refresh);
+                        if let Some((app_pid, app)) = &item.app {
+                            // Collect only app parent process
+                            if app_pid == &item.pid {
+                                let mut app_item = item.clone();
+                                if let Some(name) = &app.name {
+                                    app_item.name = name.clone();
+                                }
+                                apps.insert(*app_pid, app_item);
+                            }
+                        }
+                        process_items.push(item);
                     }
-                    Message::Snapshot(graph_item, process_items)
+                    // Add app children
+                    for item in process_items.iter() {
+                        if let Some((app_pid, _)) = &item.app {
+                            if app_pid != &item.pid {
+                                apps.entry(*app_pid).and_modify(|x| {
+                                    x.cpu_usage += item.cpu_usage;
+                                    x.disk_read += item.disk_read;
+                                    x.disk_write += item.disk_write;
+                                    x.disk_total += item.disk_total;
+                                    for (gpu_id, info) in item.gpu_usages.iter() {
+                                        x.gpu_usages
+                                            .entry(*gpu_id)
+                                            .or_insert(ProcessGpuInfo::default())
+                                            .add(info);
+                                    }
+                                    x.gpu_total.add(&item.gpu_total);
+                                    x.memory += item.memory;
+                                    //TODO: only do once?
+                                    x.generate_strings();
+                                });
+                            }
+                        }
+                    }
+                    let mut app_items = Vec::with_capacity(apps.len());
+                    for (_pid, app) in apps {
+                        app_items.push(app);
+                    }
+                    Message::Snapshot(graph_item, app_items, process_items)
                 };
 
                 match tx.blocking_send(message) {
