@@ -402,11 +402,7 @@ impl Platform for LinuxPlatform {
         self.gpu_items.clone()
     }
 
-    fn process_app<'a>(
-        &self,
-        mut process: &'a Process,
-        sys: &'a System,
-    ) -> Option<(Pid, Arc<AppEntry>)> {
+    fn process_app<'a>(&self, mut process: &'a Process, sys: &'a System) -> Option<Arc<AppEntry>> {
         // This loops to look for any parent processes that have an associated app, as well
         //TODO: maximum depth for parent app search?
         loop {
@@ -416,7 +412,7 @@ impl Platform for LinuxPlatform {
             for app in self.app_entries.iter() {
                 let Some(cmd) = app.args.get(0) else { continue };
                 if proc_cmd == cmd || proc_exe == cmd {
-                    return Some((process.pid(), app.clone()));
+                    return Some(app.clone());
                 }
             }
             let parent = process.parent()?;

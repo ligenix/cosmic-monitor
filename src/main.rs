@@ -895,7 +895,10 @@ impl Application for App {
                     .push(widget::space().height(space_m));
 
                 //TODO: table is too slow, this uses list to emulate table
-                let categories = ProcessCategory::all();
+                let (categories, content) = match nav_page {
+                    NavPage::Applications => (ProcessCategory::applications(), &self.app_content),
+                    _ => (ProcessCategory::processes(), &self.process_content),
+                };
                 let mut header =
                     widget::row::with_capacity(categories.len()).align_y(Alignment::Center);
                 for &category in categories {
@@ -919,10 +922,6 @@ impl Application for App {
                         .push(widget::mouse_area(row).on_press(Message::ProcessSort(category)));
                 }
                 page_header = page_header.push(header);
-                let content = match nav_page {
-                    NavPage::Applications => &self.app_content,
-                    _ => &self.process_content,
-                };
                 iced::widget::List::new(content, move |_i, item| {
                     let mut row =
                         widget::row::with_capacity(categories.len()).align_y(Alignment::Center);

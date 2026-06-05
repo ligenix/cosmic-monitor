@@ -20,7 +20,7 @@ pub trait Platform: Send + Sync {
         Vec::new()
     }
 
-    fn process_app(&self, _process: &Process, _sys: &System) -> Option<(Pid, Arc<AppEntry>)> {
+    fn process_app(&self, _process: &Process, _sys: &System) -> Option<Arc<AppEntry>> {
         None
     }
 

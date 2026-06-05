@@ -60,7 +60,21 @@ pub enum ProcessCategory {
 }
 
 impl ProcessCategory {
-    pub fn all() -> &'static [Self] {
+    pub fn applications() -> &'static [Self] {
+        &[
+            Self::App,
+            Self::Name,
+            Self::User,
+            Self::CPU,
+            Self::Memory,
+            Self::GpuUsageTotal,
+            Self::GpuVramTotal,
+            // Having both disk read and write takes up too much space
+            Self::DiskTotal,
+        ]
+    }
+
+    pub fn processes() -> &'static [Self] {
         &[
             Self::App,
             Self::Name,
@@ -151,9 +165,9 @@ impl ProcessGpuInfo {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProcessItem {
-    pub app: Option<(Pid, Arc<AppEntry>)>,
+    pub app: Option<Arc<AppEntry>>,
     pub cpu_usage: u32,
     pub disk_read: u64,
     pub disk_write: u64,
@@ -163,7 +177,7 @@ pub struct ProcessItem {
     pub memory: u64,
     pub name: String,
     pub parent: Option<Pid>,
-    pub pid: Pid,
+    pub pid: Option<Pid>,
     pub priority: Option<i32>,
     pub username: String,
     pub strings: HashMap<ProcessCategory, String>,
@@ -239,7 +253,7 @@ impl ProcessItem {
             memory,
             name,
             parent: p.parent(),
-            pid,
+            pid: Some(pid),
             priority,
             username,
             strings: HashMap::new(),
@@ -295,8 +309,10 @@ impl ProcessItem {
             ProcessCategory::Memory,
             format!("{}", format_size(self.memory, BINARY)),
         );
-        self.strings
-            .insert(ProcessCategory::PID, self.pid.to_string());
+        self.strings.insert(
+            ProcessCategory::PID,
+            self.pid.map(|x| x.to_string()).unwrap_or_default(),
+        );
         //TODO: translate
         self.strings.insert(
             ProcessCategory::Priority,
@@ -350,7 +366,7 @@ impl ItemInterface<ProcessCategory> for ProcessItem {
     fn get_icon(&self, category: ProcessCategory) -> Option<Icon> {
         match category {
             ProcessCategory::App => {
-                let icon = self.app.as_ref()?.1.icon.as_ref()?.as_str();
+                let icon = self.app.as_ref()?.icon.as_ref()?.as_str();
                 Some(widget::icon::from_name(icon).size(24).icon())
             }
             _ => None,
@@ -365,8 +381,8 @@ impl ItemInterface<ProcessCategory> for ProcessItem {
     fn compare(&self, other: &Self, category: ProcessCategory) -> Ordering {
         match category {
             ProcessCategory::App => match (
-                self.app.as_ref().and_then(|x| x.1.name.as_ref()),
-                other.app.as_ref().and_then(|x| x.1.name.as_ref()),
+                self.app.as_ref().and_then(|x| x.name.as_ref()),
+                other.app.as_ref().and_then(|x| x.name.as_ref()),
             ) {
                 (Some(name), Some(other_name)) => name.cmp(&other_name),
                 // Sort some name above no name

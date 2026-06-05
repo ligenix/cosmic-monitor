@@ -258,43 +258,35 @@ pub fn worker() -> impl Stream<Item = Message> {
                         }
                         let item =
                             ProcessItem::new(process, &sys, &platform, &users, processes_refresh);
-                        if let Some((app_pid, app)) = &item.app {
-                            // Collect only app parent process
-                            if app_pid == &item.pid {
-                                let mut app_item = item.clone();
-                                if let Some(name) = &app.name {
-                                    app_item.name = name.clone();
-                                }
-                                apps.insert(*app_pid, app_item);
+                        if let Some(app) = &item.app {
+                            let app_item = apps
+                                .entry((app.id.clone(), item.username.clone()))
+                                .or_insert_with(|| {
+                                    let mut app_item = ProcessItem::default();
+                                    app_item.app = Some(app.clone());
+                                    app_item.name = app.name.clone().unwrap_or_default();
+                                    app_item.username = item.username.clone();
+                                    app_item
+                                });
+                            app_item.cpu_usage += item.cpu_usage;
+                            app_item.disk_read += item.disk_read;
+                            app_item.disk_write += item.disk_write;
+                            app_item.disk_total += item.disk_total;
+                            for (gpu_id, info) in item.gpu_usages.iter() {
+                                app_item
+                                    .gpu_usages
+                                    .entry(*gpu_id)
+                                    .or_insert(ProcessGpuInfo::default())
+                                    .add(info);
                             }
+                            app_item.gpu_total.add(&item.gpu_total);
+                            app_item.memory += item.memory;
                         }
                         process_items.push(item);
                     }
-                    // Add app children
-                    for item in process_items.iter() {
-                        if let Some((app_pid, _)) = &item.app {
-                            if app_pid != &item.pid {
-                                apps.entry(*app_pid).and_modify(|x| {
-                                    x.cpu_usage += item.cpu_usage;
-                                    x.disk_read += item.disk_read;
-                                    x.disk_write += item.disk_write;
-                                    x.disk_total += item.disk_total;
-                                    for (gpu_id, info) in item.gpu_usages.iter() {
-                                        x.gpu_usages
-                                            .entry(*gpu_id)
-                                            .or_insert(ProcessGpuInfo::default())
-                                            .add(info);
-                                    }
-                                    x.gpu_total.add(&item.gpu_total);
-                                    x.memory += item.memory;
-                                    //TODO: only do once?
-                                    x.generate_strings();
-                                });
-                            }
-                        }
-                    }
                     let mut app_items = Vec::with_capacity(apps.len());
-                    for (_pid, app) in apps {
+                    for ((_id, _user), mut app) in apps {
+                        app.generate_strings();
                         app_items.push(app);
                     }
                     Message::Snapshot(graph_item, app_items, process_items)
