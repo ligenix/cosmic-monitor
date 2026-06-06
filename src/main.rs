@@ -916,7 +916,6 @@ impl Application for App {
 
     fn on_nav_select(&mut self, id: nav_bar::Id) -> Task<Self::Message> {
         self.nav_model.activate(id);
-        self.core.nav_bar_set_toggled(false);
         Task::none()
     }
 
