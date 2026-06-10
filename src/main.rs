@@ -1,13 +1,14 @@
 // Copyright 2023 System76 <info@system76.com>
 // SPDX-License-Identifier: GPL-3.0-only
 
+use clap_lex::RawArgs;
 use cosmic::{
     Application, Element,
     app::{Core, Settings, Task, context_drawer},
     cosmic_config::{self, CosmicConfigEntry},
     cosmic_theme, executor,
     iced::{
-        self, Alignment, Length, Limits, Size, Subscription,
+        self, Alignment, Border, Length, Limits, Size, Subscription,
         core::text::{Ellipsize, EllipsizeHeightLimit, Shaping},
     },
     surface, theme,
@@ -29,6 +30,7 @@ use std::{
     error::Error,
     time::{Duration, Instant},
 };
+use sysinfo::Pid;
 
 use config::{AppTheme, CONFIG_VERSION, Config};
 mod config;
@@ -43,8 +45,6 @@ mod localize;
 
 use menu::menu_bar;
 mod menu;
-
-use clap_lex::RawArgs;
 
 #[rustfmt::skip]
 fn main() -> Result<(), Box<dyn Error>> {
@@ -155,7 +155,11 @@ fn table_header(
     header.into()
 }
 
-fn table_row<'a>(item: &'a ProcessItem, categories: &[ProcessCategory]) -> Element<'a, Message> {
+fn table_row<'a>(
+    item: &'a ProcessItem,
+    categories: &[ProcessCategory],
+    selected: &Option<Pid>,
+) -> Element<'a, Message> {
     let cosmic_theme::Spacing { space_xxs, .. } = theme::active().cosmic().spacing;
 
     let mut row = widget::row::with_capacity(categories.len()).align_y(Alignment::Center);
@@ -184,7 +188,25 @@ fn table_row<'a>(item: &'a ProcessItem, categories: &[ProcessCategory]) -> Eleme
                 .width(category.width()),
         );
     }
-    row.into()
+    let mut container = widget::container(row);
+    //TODO: allow App selection
+    if selected.is_some() && selected == &item.pid {
+        container = container.style(|theme| {
+            let cosmic = theme.cosmic();
+            widget::container::Style {
+                text_color: Some(cosmic.on_accent_color().into()),
+                background: Some(cosmic.accent_color().into()),
+                border: Border {
+                    radius: cosmic.corner_radii.radius_xs.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        });
+    }
+    widget::mouse_area(container)
+        .on_press(Message::ProcessSelect(item.pid))
+        .into()
 }
 
 #[derive(Clone, Debug)]
@@ -218,17 +240,26 @@ impl MenuAction for Action {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum DialogKind {
+    ProcessQuit { name: String, pid: Pid, force: bool },
+}
+
 /// Messages that are used specifically by our [`App`].
 #[derive(Clone, Debug)]
 pub enum Message {
     None,
     AppTheme(AppTheme),
     Config(Box<Config>),
+    DialogCancel,
+    DialogConfirm,
+    DialogOpen(DialogKind),
     GpuSelect(usize),
     Graph(GraphItem),
     LaunchUrl(String),
     NavPage(NavPage),
     ProcessSearch(String),
+    ProcessSelect(Option<Pid>),
     ProcessSort(ProcessCategory),
     SeeAllProcesses(bool, ProcessCategory, bool),
     Snapshot(GraphItem, Vec<ProcessItem>, Vec<ProcessItem>),
@@ -293,6 +324,7 @@ pub struct App {
     config_handler: Option<cosmic_config::Config>,
     context_page: ContextPage,
     core: Core,
+    dialog_opt: Option<DialogKind>,
     gpu_id_opt: Option<GpuId>,
     gpu_names: Vec<String>,
     graph_history: VecDeque<GraphItem>,
@@ -302,6 +334,7 @@ pub struct App {
     processes: Vec<ProcessItem>,
     process_content: iced::widget::list::Content<ProcessItem>,
     process_search: (String, Option<Regex>),
+    process_selected: Option<Pid>,
     process_sort: (ProcessCategory, bool),
 }
 
@@ -408,7 +441,7 @@ impl App {
             column = column.push(
                 widget::column::with_capacity(2)
                     .push(widget::divider::horizontal::default())
-                    .push(table_row(item, &categories)),
+                    .push(table_row(item, &categories, &self.process_selected)),
             );
         }
         column = column.push(widget::divider::horizontal::default());
@@ -886,6 +919,7 @@ impl Application for App {
             config_handler: flags.config_handler,
             context_page: ContextPage::Settings,
             core,
+            dialog_opt: None,
             gpu_id_opt: None,
             gpu_names: Vec::new(),
             graph_history: VecDeque::new(),
@@ -895,6 +929,7 @@ impl Application for App {
             processes: Vec::new(),
             process_content: iced::widget::list::Content::new(),
             process_search: (String::new(), None),
+            process_selected: None,
             process_sort: (ProcessCategory::default(), false),
         };
 
@@ -954,6 +989,30 @@ impl Application for App {
                     return self.update_config();
                 }
             }
+            Message::DialogCancel => {
+                self.dialog_opt = None;
+            }
+            Message::DialogConfirm => {
+                if let Some(dialog_kind) = self.dialog_opt.take() {
+                    match dialog_kind {
+                        DialogKind::ProcessQuit { pid, force, .. } => {
+                            //TODO: show errors?
+                            #[cfg(unix)]
+                            {
+                                if let Ok(pid_c) = pid.as_u32().try_into() {
+                                    let sig = if force { libc::SIGKILL } else { libc::SIGTERM };
+                                    unsafe {
+                                        libc::kill(pid_c, sig);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Message::DialogOpen(dialog_kind) => {
+                self.dialog_opt = Some(dialog_kind);
+            }
             Message::GpuSelect(gpu_i) => {
                 self.gpu_id_opt = None;
                 if let Some(graph_item) = &self.graph_snapshot {
@@ -997,6 +1056,10 @@ impl Application for App {
                 };
                 self.process_search = (search, regex_opt);
                 self.update_snapshot();
+            }
+            Message::ProcessSelect(process_selected) => {
+                self.process_selected = process_selected;
+                //TODO: reset that item in Contents
             }
             Message::ProcessSort(category) => {
                 if self.process_sort.0 == category {
@@ -1060,6 +1123,92 @@ impl Application for App {
             )
             .title(fl!("settings")),
         })
+    }
+
+    fn dialog(&self) -> Option<Element<'_, Self::Message>> {
+        let mut dialog = widget::dialog().secondary_action(
+            widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
+        );
+        match self.dialog_opt.as_ref()? {
+            DialogKind::ProcessQuit { name, force, .. } => {
+                dialog = dialog
+                    .title(if *force {
+                        fl!("force-quit-title")
+                    } else {
+                        fl!("quit-title")
+                    })
+                    .body(if *force {
+                        fl!("force-quit-body", name = name)
+                    } else {
+                        fl!("quit-body", name = name)
+                    })
+                    .primary_action(
+                        widget::button::destructive(if *force {
+                            fl!("force-quit")
+                        } else {
+                            fl!("quit")
+                        })
+                        .on_press(Message::DialogConfirm),
+                    );
+            }
+        }
+        Some(dialog.into())
+    }
+
+    fn footer(&self) -> Option<Element<'_, Self::Message>> {
+        let cosmic_theme::Spacing { space_xxs, .. } = theme::active().cosmic().spacing;
+
+        let pid = self.process_selected?;
+        let item = self.processes.iter().find(|x| x.pid == Some(pid))?;
+        let mut row = widget::row::with_capacity(5)
+            .align_y(Alignment::Center)
+            .spacing(space_xxs);
+        if let Some(icon) = item.get_icon(ProcessCategory::App) {
+            row = row.push(icon);
+        }
+        row = row
+            .push(
+                widget::container(
+                    widget::text(&item.name)
+                        .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
+                        .shaping(Shaping::Basic),
+                )
+                .align_x(Alignment::Start)
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
+            )
+            .push(
+                widget::container(
+                    widget::text(item.text(ProcessCategory::PID)).shaping(Shaping::Basic),
+                )
+                .align_x(Alignment::End)
+                .align_y(Alignment::Center)
+                .width(Length::Shrink),
+            )
+            .push(
+                widget::button::destructive(fl!("force-quit")).on_press(Message::DialogOpen(
+                    DialogKind::ProcessQuit {
+                        name: item.name.clone(),
+                        pid,
+                        force: true,
+                    },
+                )),
+            )
+            .push(
+                widget::button::standard(fl!("quit")).on_press(Message::DialogOpen(
+                    DialogKind::ProcessQuit {
+                        name: item.name.clone(),
+                        pid,
+                        force: false,
+                    },
+                )),
+            );
+        Some(
+            widget::container(row)
+                .padding(space_xxs)
+                .class(theme::Container::Card)
+                .into(),
+        )
     }
 
     fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
@@ -1130,7 +1279,7 @@ impl Application for App {
                 iced::widget::List::new(content, move |_i, item| {
                     widget::column::with_capacity(2)
                         .push(widget::divider::horizontal::default())
-                        .push(table_row(item, &categories))
+                        .push(table_row(item, &categories, &self.process_selected))
                         .into()
                 })
                 .into()

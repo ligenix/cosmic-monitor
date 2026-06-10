@@ -71,6 +71,17 @@ match-desktop = Match desktop
 dark = Dark
 light = Light
 
+# Dialogs
+cancel = Cancel
+
+## Process quit
+force-quit = Force quit
+force-quit-title = Force quit the process?
+force-quit-body = Force quit will immediately and forcibly end "{$name}" without cleanup or warning. Do you want to continue?
+quit = Quit
+quit-title = Quit the process?
+quit-body = Do you want to end "{$name}"?
+
 # Menu
 
 ## View
