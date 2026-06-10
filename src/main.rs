@@ -841,13 +841,16 @@ impl App {
             }
         };
 
-        widget::scrollable(
-            widget::container(content)
-                .padding([0, space_xl])
-                .width(Length::Fill),
+        widget::mouse_area(
+            widget::scrollable(
+                widget::container(content)
+                    .padding([0, space_xl])
+                    .width(Length::Fill),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill),
         )
-        .width(Length::Fill)
-        .height(Length::Fill)
+        .on_press(Message::ProcessSelect(None))
         .into()
     }
 }
@@ -943,8 +946,14 @@ impl Application for App {
 
     //TODO: currently the first escape unfocuses, and the second calls this function
     fn on_escape(&mut self) -> Task<Message> {
+        if self.dialog_opt.take().is_some() {
+            return Task::none();
+        }
         if self.core.window.show_context {
             return self.update(Message::ToggleContextPage(self.context_page));
+        }
+        if self.process_selected.take().is_some() {
+            return Task::none();
         }
         Task::none()
     }
@@ -1739,17 +1748,20 @@ impl Application for App {
             }
             _ => widget::indeterminate_circular().into(),
         };
-        widget::column!(
-            page_header,
-            widget::scrollable(
-                widget::container(content)
-                    .padding([0, space_xl])
-                    .width(Length::Fill)
+        widget::mouse_area(
+            widget::column!(
+                page_header,
+                widget::scrollable(
+                    widget::container(content)
+                        .padding([0, space_xl])
+                        .width(Length::Fill)
+                )
+                .width(Length::Fill),
             )
-            .width(Length::Fill),
+            .width(Length::Fill)
+            .height(Length::Fill),
         )
-        .width(Length::Fill)
-        .height(Length::Fill)
+        .on_press(Message::ProcessSelect(None))
         .into()
     }
 
