@@ -161,6 +161,9 @@ impl LinuxPlatform {
         for app in Iter::new(default_paths())
             .filter_map(|p| DesktopEntry::from_path(p, Some(&locales)).ok())
         {
+            if app.no_display() {
+                continue;
+            }
             let Ok(args) = app.parse_exec() else { continue };
             let id = app.id().to_string();
             let mut icon = app.icon().map(|x| x.to_string());
