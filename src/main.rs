@@ -844,7 +844,7 @@ impl App {
         widget::mouse_area(
             widget::scrollable(
                 widget::container(content)
-                    .padding([0, space_xl])
+                    .padding([0, space_xl, space_s, space_xl])
                     .width(Length::Fill),
             )
             .width(Length::Fill)
@@ -1230,6 +1230,7 @@ impl Application for App {
             space_xl,
             space_l,
             space_m,
+            space_s,
             space_xs,
             space_xxs,
             ..
@@ -1763,7 +1764,7 @@ impl Application for App {
                 page_header,
                 widget::scrollable(
                     widget::container(content)
-                        .padding([0, space_xl])
+                        .padding([0, space_xl, space_s, space_xl])
                         .width(Length::Fill)
                 )
                 .width(Length::Fill),
