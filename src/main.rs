@@ -963,6 +963,9 @@ impl Application for App {
         if self.process_selected.take().is_some() {
             return Task::none();
         }
+        if !self.process_search.0.is_empty() || self.process_search.1.is_some() {
+            return self.update(Message::ProcessSearch(String::new()));
+        }
         Task::none()
     }
 
@@ -1278,6 +1281,7 @@ impl Application for App {
                     .push(
                         widget::container(
                             widget::search_input(fl!("search-processes"), &self.process_search.0)
+                                .on_clear(Message::ProcessSearch(String::new()))
                                 .on_input(Message::ProcessSearch)
                                 .width(360.0),
                         )
