@@ -965,6 +965,7 @@ impl Application for App {
 
     fn on_nav_select(&mut self, id: nav_bar::Id) -> Task<Self::Message> {
         self.nav_model.activate(id);
+        self.process_selected = None;
         Task::none()
     }
 
@@ -1057,6 +1058,7 @@ impl Application for App {
                 }
                 if let Some(id) = id_opt {
                     self.nav_model.activate(id);
+                    self.process_selected = None;
                 }
             }
             Message::ProcessSearch(search) => {
@@ -1073,7 +1075,7 @@ impl Application for App {
             }
             Message::ProcessSelect(process_selected) => {
                 self.process_selected = process_selected;
-                //TODO: reset that item in Contents
+                //TODO: reset that item in Contents?
             }
             Message::ProcessSort(category) => {
                 if self.process_sort.0 == category {
