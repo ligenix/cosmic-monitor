@@ -180,11 +180,10 @@ impl ItemCategory for ProcessCategory {
             Self::User | Self::PID | Self::Priority => Length::Fixed(96.0),
             Self::CPU | Self::GpuUsageTotal => Length::Fixed(64.0),
             Self::GpuUsage(..) => Length::Fixed(80.0),
-            Self::Memory
-            | Self::GpuVramTotal
-            | Self::DiskRead
-            | Self::DiskWrite
-            | Self::DiskTotal => Length::Fixed(96.0),
+            Self::Memory | Self::DiskRead | Self::DiskWrite | Self::DiskTotal => {
+                Length::Fixed(96.0)
+            }
+            Self::GpuVramTotal => Length::Fixed(104.0),
             Self::GpuVram(..) => Length::Fixed(112.0),
         }
     }

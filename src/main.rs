@@ -130,14 +130,10 @@ fn table_header(
 ) -> Element<'static, Message> {
     let mut header = widget::row::with_capacity(categories.len()).align_y(Alignment::Center);
     for &category in categories {
-        let mut row = widget::row::with_capacity(2)
-            .align_y(Alignment::Center)
-            .height(Length::Fixed(24.0))
-            .padding([0, 8])
-            .width(category.width());
-        row = row.push(widget::text::heading(category.to_string()));
+        let mut cat_row = widget::row::with_capacity(2).align_y(Alignment::Center);
+        cat_row = cat_row.push(widget::text::heading(category.to_string()));
         if category == sort_category {
-            row = row.push(
+            cat_row = cat_row.push(
                 widget::icon::from_name(if sort_direction {
                     "pan-up-symbolic"
                 } else {
@@ -145,11 +141,20 @@ fn table_header(
                 })
                 .size(16),
             );
-        }
-        if sortable {
-            header = header.push(widget::mouse_area(row).on_press(Message::ProcessSort(category)));
         } else {
-            header = header.push(row);
+            cat_row = cat_row.push(widget::space().width(16));
+        }
+        let container = widget::container(cat_row)
+            .align_x(category.data_align())
+            .align_y(Alignment::Center)
+            .padding([0, 8])
+            .height(Length::Fixed(40.0))
+            .width(category.width());
+        if sortable {
+            header =
+                header.push(widget::mouse_area(container).on_press(Message::ProcessSort(category)));
+        } else {
+            header = header.push(container);
         }
     }
     header.into()
