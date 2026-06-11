@@ -3,7 +3,7 @@
 
 use clap_lex::RawArgs;
 use cosmic::{
-    Application, Element,
+    Application, ApplicationExt, Element,
     app::{Core, Settings, Task, context_drawer},
     cosmic_config::{self, CosmicConfigEntry},
     cosmic_theme, executor,
@@ -941,7 +941,7 @@ impl Application for App {
             process_sort: (ProcessCategory::default(), false),
         };
 
-        let command = app.update_config();
+        let command = Task::batch([app.update_config(), app.set_window_title(fl!("app-name"))]);
         (app, command)
     }
 
