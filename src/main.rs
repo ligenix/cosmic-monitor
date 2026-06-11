@@ -324,7 +324,6 @@ pub struct App {
     about: About,
     app_themes: Vec<String>,
     apps: Vec<ProcessItem>,
-    app_content: iced::widget::list::Content<ProcessItem>,
     config: Config,
     config_handler: Option<cosmic_config::Config>,
     context_page: ContextPage,
@@ -357,35 +356,38 @@ impl App {
             }
         }
 
-        for (list, content) in &mut [
-            (&mut self.apps, &mut self.app_content),
-            (&mut self.processes, &mut self.process_content),
-        ] {
-            list.sort_by(|a, b| {
-                if self.process_sort.1 {
-                    b.compare(a, self.process_sort.0)
-                } else {
-                    a.compare(b, self.process_sort.0)
-                }
-            });
+        let list = if matches!(
+            self.nav_model.active_data::<NavPage>(),
+            Some(NavPage::Applications)
+        ) {
+            &mut self.apps
+        } else {
+            &mut self.processes
+        };
+        list.sort_by(|a, b| {
+            if self.process_sort.1 {
+                b.compare(a, self.process_sort.0)
+            } else {
+                a.compare(b, self.process_sort.0)
+            }
+        });
 
-            let mut i = 0;
-            for item in list.iter() {
-                if let Some(regex) = &self.process_search.1 {
-                    if !item.matches(&regex) {
-                        continue;
-                    }
+        let mut i = 0;
+        for item in list.iter() {
+            if let Some(regex) = &self.process_search.1 {
+                if !item.matches(&regex) {
+                    continue;
                 }
-                if i >= content.len() {
-                    content.push(item.clone());
-                } else if content.get(i) != Some(&item) {
-                    *content.get_mut(i).unwrap() = item.clone();
-                }
-                i += 1;
             }
-            while i < content.len() {
-                content.remove(i);
+            if i >= self.process_content.len() {
+                self.process_content.push(item.clone());
+            } else if self.process_content.get(i) != Some(&item) {
+                *self.process_content.get_mut(i).unwrap() = item.clone();
             }
+            i += 1;
+        }
+        while i < self.process_content.len() {
+            self.process_content.remove(i);
         }
     }
 
@@ -914,7 +916,9 @@ impl Application for App {
                 if matches!(page, NavPage::Dashboard) {
                     b = b.activate();
                 }
-                b.text(page.title()).data::<NavPage>(page)
+                b.text(page.title())
+                    .data::<NavPage>(page)
+                    .data::<widget::Id>(widget::Id::unique())
             });
         }
 
@@ -922,7 +926,6 @@ impl Application for App {
             about,
             app_themes,
             apps: Vec::new(),
-            app_content: iced::widget::list::Content::new(),
             config: flags.config,
             config_handler: flags.config_handler,
             context_page: ContextPage::Settings,
@@ -966,6 +969,7 @@ impl Application for App {
     fn on_nav_select(&mut self, id: nav_bar::Id) -> Task<Self::Message> {
         self.nav_model.activate(id);
         self.process_selected = None;
+        self.update_snapshot();
         Task::none()
     }
 
@@ -1059,6 +1063,7 @@ impl Application for App {
                 if let Some(id) = id_opt {
                     self.nav_model.activate(id);
                     self.process_selected = None;
+                    self.update_snapshot();
                 }
             }
             Message::ProcessSearch(search) => {
@@ -1245,7 +1250,7 @@ impl Application for App {
 
         let nav_page = self
             .nav_model
-            .active_data()
+            .active_data::<NavPage>()
             .map_or(NavPage::Dashboard, |x| *x);
         let mut page_header = widget::column::with_capacity(6).padding([0, space_xl]);
         page_header = page_header
@@ -1258,11 +1263,15 @@ impl Application for App {
             .push(widget::space().height(space_m));
         let content: Element<Message> = match (nav_page, &self.graph_snapshot) {
             (NavPage::Dashboard, Some(graph_item)) => {
-                // view_dashboard will do its own container so it can know correct window height
-                return widget::responsive(|size| self.view_dashboard(graph_item, size))
+                let content = widget::responsive(|size| self.view_dashboard(graph_item, size))
                     .height(Length::Fill)
-                    .width(Length::Fill)
-                    .into();
+                    .width(Length::Fill);
+                // view_dashboard will do its own container so it can know correct window height
+                return if let Some(id) = self.nav_model.active_data::<widget::Id>() {
+                    widget::id_container(content, id.clone()).into()
+                } else {
+                    content.into()
+                };
             }
             (NavPage::Applications | NavPage::Processes, _) => {
                 page_header = page_header
@@ -1278,15 +1287,9 @@ impl Application for App {
                     .push(widget::space().height(space_m));
 
                 //TODO: table is too slow, this uses list to emulate table
-                let (categories, content) = match nav_page {
-                    NavPage::Applications => (
-                        ProcessCategory::for_applications(self.process_sort.0),
-                        &self.app_content,
-                    ),
-                    _ => (
-                        ProcessCategory::for_processes(self.process_sort.0),
-                        &self.process_content,
-                    ),
+                let categories = match nav_page {
+                    NavPage::Applications => ProcessCategory::for_applications(self.process_sort.0),
+                    _ => ProcessCategory::for_processes(self.process_sort.0),
                 };
                 page_header = page_header.push(table_header(
                     &categories,
@@ -1294,7 +1297,7 @@ impl Application for App {
                     self.process_sort.1,
                     true,
                 ));
-                iced::widget::List::new(content, move |_i, item| {
+                iced::widget::List::new(&self.process_content, move |_i, item| {
                     widget::column::with_capacity(2)
                         .push(widget::divider::horizontal::default())
                         .push(table_row(item, &categories, &self.process_selected))
@@ -1766,7 +1769,7 @@ impl Application for App {
             }
             _ => widget::indeterminate_circular().into(),
         };
-        widget::mouse_area(
+        let content = widget::mouse_area(
             widget::column!(
                 page_header,
                 widget::scrollable(
@@ -1779,8 +1782,12 @@ impl Application for App {
             .width(Length::Fill)
             .height(Length::Fill),
         )
-        .on_press(Message::ProcessSelect(None))
-        .into()
+        .on_press(Message::ProcessSelect(None));
+        if let Some(id) = self.nav_model.active_data::<widget::Id>() {
+            widget::id_container(content, id.clone()).into()
+        } else {
+            content.into()
+        }
     }
 
     fn system_theme_update(
