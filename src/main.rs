@@ -1228,6 +1228,7 @@ impl Application for App {
     fn view(&self) -> Element<'_, Self::Message> {
         let cosmic_theme::Spacing {
             space_xl,
+            space_l,
             space_m,
             space_xs,
             space_xxs,
@@ -1295,7 +1296,7 @@ impl Application for App {
             }
             (NavPage::Cpu, Some(graph_item)) => {
                 let mut column = widget::column::with_capacity(3)
-                    .spacing(space_m)
+                    .spacing(space_l)
                     .width(Length::Fill);
 
                 // Overall utilization
@@ -1383,7 +1384,7 @@ impl Application for App {
                 let mem = &graph_item.memory;
 
                 let mut column = widget::column::with_capacity(3)
-                    .spacing(space_m)
+                    .spacing(space_l)
                     .width(Length::Fill);
 
                 // Memory information
@@ -1495,32 +1496,34 @@ impl Application for App {
                             .spacing(space_xxs),
                         )
                         .push(widget::space().height(space_m));
-                    let mut column = widget::column::with_capacity(6).spacing(space_xxs);
-                    //column = column.push(widget::text::title4(&gpu.name));
+                    let mut column = widget::column::with_capacity(4).spacing(space_l);
                     if let Some(usage) = gpu.usage {
                         column = column.push(
-                            widget::row!(
-                                widget::column!(
-                                    widget::text::body(fl!("utilization")),
-                                    widget::text::heading(format!("{:.1}%", usage))
-                                ),
-                                widget::column!(
-                                    widget::text::body(fl!("temperature")),
-                                    widget::text::heading(
-                                        gpu.temp
-                                            .map_or("N/A".into(), |temp| format!("{:.1}°C", temp))
-                                    )
-                                ),
+                            widget::column!(
+                                widget::row!(
+                                    widget::column!(
+                                        widget::text::body(fl!("utilization")),
+                                        widget::text::heading(format!("{:.1}%", usage))
+                                    ),
+                                    widget::column!(
+                                        widget::text::body(fl!("temperature")),
+                                        widget::text::heading(
+                                            gpu.temp.map_or("N/A".into(), |temp| format!(
+                                                "{:.1}°C",
+                                                temp
+                                            ))
+                                        )
+                                    ),
+                                )
+                                .spacing(space_m),
+                                canvas(
+                                    Graph::new(GraphKind::GpuUsage(gpu.id), &self.graph_history)
+                                        .legend(),
+                                )
+                                .height(300.0)
+                                .width(Length::Fill),
                             )
-                            .spacing(space_m),
-                        );
-                        column = column.push(
-                            canvas(
-                                Graph::new(GraphKind::GpuUsage(gpu.id), &self.graph_history)
-                                    .legend(),
-                            )
-                            .height(300.0)
-                            .width(Length::Fill),
+                            .spacing(space_xxs),
                         );
 
                         // Top processes
@@ -1535,32 +1538,39 @@ impl Application for App {
                     if let Some(vram_used) = gpu.vram_used {
                         if let Some(vram_total) = gpu.vram_total {
                             column = column.push(
-                                widget::row!(
-                                    widget::column!(
-                                        widget::text::body(fl!("capacity")),
-                                        widget::text::heading(
-                                            humansize::format_size(vram_total, humansize::BINARY)
+                                widget::column!(
+                                    widget::row!(
+                                        widget::column!(
+                                            widget::text::body(fl!("capacity")),
+                                            widget::text::heading(
+                                                humansize::format_size(
+                                                    vram_total,
+                                                    humansize::BINARY
+                                                )
                                                 .to_string()
-                                        )
-                                    ),
-                                    widget::column!(
-                                        widget::text::body(fl!("vram")),
-                                        widget::text::heading(format!(
-                                            "{} ({:.1}%)",
-                                            humansize::format_size(vram_used, humansize::BINARY),
-                                            100.0 * (vram_used as f64) / (vram_total as f64)
-                                        ))
-                                    ),
+                                            )
+                                        ),
+                                        widget::column!(
+                                            widget::text::body(fl!("vram")),
+                                            widget::text::heading(format!(
+                                                "{} ({:.1}%)",
+                                                humansize::format_size(
+                                                    vram_used,
+                                                    humansize::BINARY
+                                                ),
+                                                100.0 * (vram_used as f64) / (vram_total as f64)
+                                            ))
+                                        ),
+                                    )
+                                    .spacing(space_m),
+                                    canvas(
+                                        Graph::new(GraphKind::GpuVram(gpu.id), &self.graph_history)
+                                            .legend(),
+                                    )
+                                    .height(300.0)
+                                    .width(Length::Fill),
                                 )
-                                .spacing(space_m),
-                            );
-                            column = column.push(
-                                canvas(
-                                    Graph::new(GraphKind::GpuVram(gpu.id), &self.graph_history)
-                                        .legend(),
-                                )
-                                .height(300.0)
-                                .width(Length::Fill),
+                                .spacing(space_xxs),
                             );
 
                             // Top processes
@@ -1580,7 +1590,7 @@ impl Application for App {
             }
             (NavPage::Disk, Some(graph_item)) => {
                 let mut column = widget::column::with_capacity(2 + graph_item.disks.len() * 3)
-                    .spacing(space_m)
+                    .spacing(space_l)
                     .width(Length::Fill);
 
                 let all_used = graph_item.disks.iter().fold(0, |x, disk| x + disk.used);
