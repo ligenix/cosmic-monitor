@@ -46,6 +46,7 @@ swap-usage = Swap usage
 total-utilization = Total utilization
 
 ## GPU
+gpu-utilization = GPU Utilization
 no-gpus = No supported GPUs found.
 vram = VRAM
 

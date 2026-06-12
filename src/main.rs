@@ -46,6 +46,11 @@ mod localize;
 use menu::menu_bar;
 mod menu;
 
+const SMALL_GRAPH_HEIGHT: f32 = 176.0;
+const LARGE_GRAPH_HEIGHT: f32 = 300.0;
+const MIN_GRAPH_WIDTH: f32 = 640.0;
+const MIN_PROCESSES_WIDTH: f32 = 720.0;
+
 #[rustfmt::skip]
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
@@ -414,6 +419,37 @@ impl App {
         widget::settings::view_column(vec![appearance_section.into()]).into()
     }
 
+    fn responsive_graph_top_processes<'a>(
+        &'a self,
+        category: ProcessCategory,
+        f: impl Fn() -> Element<'a, Message> + 'a,
+    ) -> Element<'a, Message> {
+        let cosmic_theme::Spacing {
+            space_xxl, space_l, ..
+        } = theme::active().cosmic().spacing;
+
+        widget::responsive(move |size| {
+            let graph = f();
+            if size.width > MIN_GRAPH_WIDTH + space_xxl as f32 + MIN_PROCESSES_WIDTH {
+                widget::row!(
+                    graph,
+                    widget::container(self.top_processes_by(false, category, false, false, 7))
+                        .width(MIN_PROCESSES_WIDTH)
+                )
+                .spacing(space_xxl)
+                .into()
+            } else {
+                widget::column!(
+                    graph,
+                    self.top_processes_by(false, category, false, false, 5)
+                )
+                .spacing(space_l)
+                .into()
+            }
+        })
+        .into()
+    }
+
     fn top_processes_by<'a>(
         &'a self,
         show_apps: bool,
@@ -585,7 +621,7 @@ impl App {
             widget::container(
                 widget::row!(
                     canvas(Graph::new(graph_kind, &self.graph_history).border())
-                        .height(176.0)
+                        .height(SMALL_GRAPH_HEIGHT)
                         .width(Length::Fill),
                     column.width(Length::Fill)
                 )
@@ -702,24 +738,23 @@ impl App {
             }
         }
 
-        let card_height = (space_s + 176 + space_s) as f32;
+        let card_height = space_s as f32 + SMALL_GRAPH_HEIGHT + space_s as f32;
         let min_width = 440.0;
-        let min_processes_width = 720.0;
         let content_width = size.width - (space_xl * 2) as f32;
         enum DashboardLayout {
             Small,
             Medium,
             Large,
         }
-        let large_width = content_width - (min_processes_width + space_s as f32) * 2.0;
+        let large_width = content_width - (MIN_PROCESSES_WIDTH + space_s as f32) * 2.0;
         let large_cards = (large_width / min_width).floor()
             * (size.height / (card_height + space_s as f32)).floor();
         // Make sure there is enough space for all cards before attempting large layout
         let (graphs_width, layout) = if large_cards >= items.len() as f32 {
             (large_width, DashboardLayout::Large)
-        } else if content_width > min_processes_width + space_s as f32 + min_width {
+        } else if content_width > MIN_PROCESSES_WIDTH + space_s as f32 + min_width {
             (
-                content_width - (min_processes_width + space_s as f32),
+                content_width - (MIN_PROCESSES_WIDTH + space_s as f32),
                 DashboardLayout::Medium,
             )
         } else {
@@ -820,7 +855,7 @@ impl App {
                 widget::row!(
                     widget::row::with_children(list_cards)
                         .spacing(space_s)
-                        .width(Length::Fixed(min_processes_width * 2.0 + space_s as f32)),
+                        .width(Length::Fixed(MIN_PROCESSES_WIDTH * 2.0 + space_s as f32)),
                     column
                 )
                 .spacing(space_s)
@@ -831,7 +866,7 @@ impl App {
                 widget::row!(
                     widget::column::with_children(list_cards)
                         .spacing(space_s)
-                        .width(Length::Fixed(min_processes_width)),
+                        .width(Length::Fixed(MIN_PROCESSES_WIDTH)),
                     column
                 )
                 .spacing(space_s)
@@ -1242,6 +1277,7 @@ impl Application for App {
     /// Creates a view after each update.
     fn view(&self) -> Element<'_, Self::Message> {
         let cosmic_theme::Spacing {
+            space_xxl,
             space_xl,
             space_l,
             space_m,
@@ -1310,52 +1346,47 @@ impl Application for App {
                 .into()
             }
             (NavPage::Cpu, Some(graph_item)) => {
-                let mut column = widget::column::with_capacity(3)
+                let mut column = widget::column::with_capacity(2)
                     .spacing(space_l)
                     .width(Length::Fill);
 
-                // Overall utilization
-                column = column.push(
-                    widget::column!(
-                        widget::text::title4(fl!("overall-utilization")),
-                        widget::row!(
-                            widget::column!(
-                                widget::text::body(fl!("utilization")),
-                                widget::text::heading(format!(
-                                    "{:.1}%",
-                                    graph_item.total_cpu_usage()
-                                ))
-                            ),
-                            widget::column!(
-                                widget::text::body(fl!("speed")),
-                                widget::text::heading(format_frequency(
-                                    graph_item.max_cpu_frequency()
-                                ))
-                            ),
-                            if let Some(temp) = graph_item.max_cpu_temp() {
-                                widget::column!(
-                                    widget::text::body(fl!("temperature")),
-                                    widget::text::heading(format!("{:.1}°C", temp))
-                                )
-                            } else {
-                                widget::column!()
-                            }
-                        )
-                        .spacing(space_m),
-                        canvas(Graph::new(GraphKind::Cpu, &self.graph_history).legend())
-                            .height(300.0)
-                            .width(Length::Fill),
-                    )
-                    .spacing(space_xxs),
-                );
-
-                // Top processes
-                column = column.push(self.top_processes_by(
-                    false,
+                // Overall utilization and top processes
+                column = column.push(self.responsive_graph_top_processes(
                     ProcessCategory::CPU,
-                    false,
-                    false,
-                    5,
+                    move || {
+                        widget::column!(
+                            widget::text::title4(fl!("overall-utilization")),
+                            widget::row!(
+                                widget::column!(
+                                    widget::text::body(fl!("utilization")),
+                                    widget::text::heading(format!(
+                                        "{:.1}%",
+                                        graph_item.total_cpu_usage()
+                                    ))
+                                ),
+                                widget::column!(
+                                    widget::text::body(fl!("speed")),
+                                    widget::text::heading(format_frequency(
+                                        graph_item.max_cpu_frequency()
+                                    ))
+                                ),
+                                if let Some(temp) = graph_item.max_cpu_temp() {
+                                    widget::column!(
+                                        widget::text::body(fl!("temperature")),
+                                        widget::text::heading(format!("{:.1}°C", temp))
+                                    )
+                                } else {
+                                    widget::column!()
+                                }
+                            )
+                            .spacing(space_m),
+                            canvas(Graph::new(GraphKind::Cpu, &self.graph_history).legend())
+                                .height(LARGE_GRAPH_HEIGHT)
+                                .width(Length::Fill),
+                        )
+                        .spacing(space_xxs)
+                        .into()
+                    },
                 ));
 
                 // Utilization per core
@@ -1398,65 +1429,60 @@ impl Application for App {
             (NavPage::Memory, Some(graph_item)) => {
                 let mem = &graph_item.memory;
 
-                let mut column = widget::column::with_capacity(3)
+                let mut column = widget::column::with_capacity(2)
                     .spacing(space_l)
                     .width(Length::Fill);
 
-                // Memory information
-                column = column.push(
-                    widget::column!(
-                        widget::text::title4(fl!("memory-usage")),
-                        widget::row!(
-                            widget::column!(
-                                widget::text::body(fl!("capacity")),
-                                widget::text::heading(
-                                    humansize::format_size(mem.total, humansize::BINARY)
-                                        .to_string()
-                                )
-                            ),
-                            widget::column!(
-                                widget::text::body(fl!("in-use")),
-                                widget::text::heading(format!(
-                                    "{} ({:.1}%)",
-                                    humansize::format_size(mem.used, humansize::BINARY),
-                                    100.0 * (mem.used as f64) / (mem.total as f64)
-                                ))
-                            ),
-                            widget::column!(
-                                widget::text::body(fl!("cache")),
-                                widget::text::heading(format!(
-                                    "{} ({:.1}%)",
-                                    humansize::format_size(mem.cache, humansize::BINARY),
-                                    100.0 * (mem.cache as f64) / (mem.total as f64)
-                                ))
-                            ),
-                            widget::column!(
-                                widget::text::body(fl!("total-utilization")),
-                                widget::text::heading({
-                                    let total_used = mem.used + mem.cache;
-                                    format!(
-                                        "{} ({:.1}%)",
-                                        humansize::format_size(total_used, humansize::BINARY),
-                                        100.0 * (total_used as f64) / (mem.total as f64)
-                                    )
-                                })
-                            ),
-                        )
-                        .spacing(space_m),
-                        canvas(Graph::new(GraphKind::Memory, &self.graph_history).legend())
-                            .height(300.0)
-                            .width(Length::Fill),
-                    )
-                    .spacing(space_xxs),
-                );
-
-                // Top processes
-                column = column.push(self.top_processes_by(
-                    false,
+                // Memory information and top processes
+                column = column.push(self.responsive_graph_top_processes(
                     ProcessCategory::Memory,
-                    false,
-                    false,
-                    5,
+                    move || {
+                        widget::column!(
+                            widget::text::title4(fl!("memory-usage")),
+                            widget::row!(
+                                widget::column!(
+                                    widget::text::body(fl!("capacity")),
+                                    widget::text::heading(
+                                        humansize::format_size(mem.total, humansize::BINARY)
+                                            .to_string()
+                                    )
+                                ),
+                                widget::column!(
+                                    widget::text::body(fl!("in-use")),
+                                    widget::text::heading(format!(
+                                        "{} ({:.1}%)",
+                                        humansize::format_size(mem.used, humansize::BINARY),
+                                        100.0 * (mem.used as f64) / (mem.total as f64)
+                                    ))
+                                ),
+                                widget::column!(
+                                    widget::text::body(fl!("cache")),
+                                    widget::text::heading(format!(
+                                        "{} ({:.1}%)",
+                                        humansize::format_size(mem.cache, humansize::BINARY),
+                                        100.0 * (mem.cache as f64) / (mem.total as f64)
+                                    ))
+                                ),
+                                widget::column!(
+                                    widget::text::body(fl!("total-utilization")),
+                                    widget::text::heading({
+                                        let total_used = mem.used + mem.cache;
+                                        format!(
+                                            "{} ({:.1}%)",
+                                            humansize::format_size(total_used, humansize::BINARY),
+                                            100.0 * (total_used as f64) / (mem.total as f64)
+                                        )
+                                    })
+                                ),
+                            )
+                            .spacing(space_m),
+                            canvas(Graph::new(GraphKind::Memory, &self.graph_history).legend())
+                                .height(LARGE_GRAPH_HEIGHT)
+                                .width(Length::Fill),
+                        )
+                        .spacing(space_xxs)
+                        .into()
+                    },
                 ));
 
                 // Swap information
@@ -1482,7 +1508,7 @@ impl Application for App {
                         )
                         .spacing(space_m),
                         canvas(Graph::new(GraphKind::Swap, &self.graph_history).legend())
-                            .height(300.0)
+                            .height(LARGE_GRAPH_HEIGHT)
                             .width(Length::Fill),
                     )
                     .spacing(space_xxs),
@@ -1511,89 +1537,90 @@ impl Application for App {
                             .spacing(space_xxs),
                         )
                         .push(widget::space().height(space_m));
-                    let mut column = widget::column::with_capacity(4).spacing(space_l);
+                    let mut column = widget::column::with_capacity(2).spacing(space_l);
                     if let Some(usage) = gpu.usage {
-                        column = column.push(
-                            widget::column!(
-                                widget::row!(
-                                    widget::column!(
-                                        widget::text::body(fl!("utilization")),
-                                        widget::text::heading(format!("{:.1}%", usage))
-                                    ),
-                                    if let Some(temp) = gpu.temp {
-                                        widget::column!(
-                                            widget::text::body(fl!("temperature")),
-                                            widget::text::heading(format!("{:.1}°C", temp))
-                                        )
-                                    } else {
-                                        widget::column!()
-                                    }
-                                )
-                                .spacing(space_m),
-                                canvas(
-                                    Graph::new(GraphKind::GpuUsage(gpu.id), &self.graph_history)
-                                        .legend(),
-                                )
-                                .height(300.0)
-                                .width(Length::Fill),
-                            )
-                            .spacing(space_xxs),
-                        );
-
-                        // Top processes
-                        column = column.push(self.top_processes_by(
-                            false,
+                        // GPU utilization and top processes
+                        column = column.push(self.responsive_graph_top_processes(
                             ProcessCategory::GpuUsage(gpu.id, Some(gpu_i)),
-                            false,
-                            false,
-                            5,
+                            move || {
+                                widget::column!(
+                                    widget::text::title4(fl!("gpu-utilization")),
+                                    widget::row!(
+                                        widget::column!(
+                                            widget::text::body(fl!("utilization")),
+                                            widget::text::heading(format!("{:.1}%", usage))
+                                        ),
+                                        if let Some(temp) = gpu.temp {
+                                            widget::column!(
+                                                widget::text::body(fl!("temperature")),
+                                                widget::text::heading(format!("{:.1}°C", temp))
+                                            )
+                                        } else {
+                                            widget::column!()
+                                        }
+                                    )
+                                    .spacing(space_m),
+                                    canvas(
+                                        Graph::new(
+                                            GraphKind::GpuUsage(gpu.id),
+                                            &self.graph_history
+                                        )
+                                        .legend(),
+                                    )
+                                    .height(LARGE_GRAPH_HEIGHT)
+                                    .width(Length::Fill),
+                                )
+                                .spacing(space_xxs)
+                                .into()
+                            },
                         ));
                     }
                     if let Some(vram_used) = gpu.vram_used {
                         if let Some(vram_total) = gpu.vram_total {
-                            column = column.push(
-                                widget::column!(
-                                    widget::row!(
-                                        widget::column!(
-                                            widget::text::body(fl!("capacity")),
-                                            widget::text::heading(
-                                                humansize::format_size(
-                                                    vram_total,
-                                                    humansize::BINARY
-                                                )
-                                                .to_string()
-                                            )
-                                        ),
-                                        widget::column!(
-                                            widget::text::body(fl!("vram")),
-                                            widget::text::heading(format!(
-                                                "{} ({:.1}%)",
-                                                humansize::format_size(
-                                                    vram_used,
-                                                    humansize::BINARY
-                                                ),
-                                                100.0 * (vram_used as f64) / (vram_total as f64)
-                                            ))
-                                        ),
-                                    )
-                                    .spacing(space_m),
-                                    canvas(
-                                        Graph::new(GraphKind::GpuVram(gpu.id), &self.graph_history)
-                                            .legend(),
-                                    )
-                                    .height(300.0)
-                                    .width(Length::Fill),
-                                )
-                                .spacing(space_xxs),
-                            );
-
-                            // Top processes
-                            column = column.push(self.top_processes_by(
-                                false,
+                            // GPU VRAM and top processes
+                            column = column.push(self.responsive_graph_top_processes(
                                 ProcessCategory::GpuVram(gpu.id, Some(gpu_i)),
-                                false,
-                                false,
-                                5,
+                                move || {
+                                    widget::column!(
+                                        widget::text::title4(fl!("gpu-vram")),
+                                        widget::row!(
+                                            widget::column!(
+                                                widget::text::body(fl!("capacity")),
+                                                widget::text::heading(
+                                                    humansize::format_size(
+                                                        vram_total,
+                                                        humansize::BINARY
+                                                    )
+                                                    .to_string()
+                                                )
+                                            ),
+                                            widget::column!(
+                                                widget::text::body(fl!("vram")),
+                                                widget::text::heading(format!(
+                                                    "{} ({:.1}%)",
+                                                    humansize::format_size(
+                                                        vram_used,
+                                                        humansize::BINARY
+                                                    ),
+                                                    100.0 * (vram_used as f64)
+                                                        / (vram_total as f64)
+                                                ))
+                                            ),
+                                        )
+                                        .spacing(space_m),
+                                        canvas(
+                                            Graph::new(
+                                                GraphKind::GpuVram(gpu.id),
+                                                &self.graph_history
+                                            )
+                                            .legend(),
+                                        )
+                                        .height(LARGE_GRAPH_HEIGHT)
+                                        .width(Length::Fill),
+                                    )
+                                    .spacing(space_xxs)
+                                    .into()
+                                },
                             ));
                         }
                     }
@@ -1603,62 +1630,57 @@ impl Application for App {
                 }
             }
             (NavPage::Disk, Some(graph_item)) => {
-                let mut column = widget::column::with_capacity(2 + graph_item.disks.len())
+                let mut column = widget::column::with_capacity(1 + graph_item.disks.len())
                     .spacing(space_l)
                     .width(Length::Fill);
 
                 let all_used = graph_item.disks.iter().fold(0, |x, disk| x + disk.used);
                 let all_total = graph_item.disks.iter().fold(0, |x, disk| x + disk.total);
                 let all_io = graph_item.total_disk_io();
-                column = column.push(
-                    widget::column!(
-                        widget::text::title4(fl!("all-disks")),
-                        widget::row!(
-                            widget::column!(
-                                widget::text::body(fl!("capacity")),
-                                widget::text::heading(
-                                    humansize::format_size(all_total, humansize::BINARY)
-                                        .to_string()
-                                )
-                            ),
-                            widget::column!(
-                                widget::text::body(fl!("in-use")),
-                                widget::text::heading(format!(
-                                    "{} ({:.1}%)",
-                                    humansize::format_size(all_used, humansize::BINARY),
-                                    100.0 * (all_used as f64) / (all_total as f64)
-                                ))
-                            ),
-                            widget::column!(
-                                widget::text::body(fl!("reading")),
-                                widget::text::heading(format!(
-                                    "{}/s",
-                                    humansize::format_size(all_io.0 as u64, humansize::DECIMAL)
-                                ))
-                            ),
-                            widget::column!(
-                                widget::text::body(fl!("writing")),
-                                widget::text::heading(format!(
-                                    "{}/s",
-                                    humansize::format_size(all_io.1 as u64, humansize::DECIMAL)
-                                ))
-                            ),
-                        )
-                        .spacing(space_m),
-                        canvas(Graph::new(GraphKind::DiskTotal, &self.graph_history).legend())
-                            .height(300.0)
-                            .width(Length::Fill),
-                    )
-                    .spacing(space_xxs),
-                );
-
-                // Top processes
-                column = column.push(self.top_processes_by(
-                    false,
+                column = column.push(self.responsive_graph_top_processes(
                     ProcessCategory::DiskTotal,
-                    false,
-                    false,
-                    5,
+                    move || {
+                        widget::column!(
+                            widget::text::title4(fl!("all-disks")),
+                            widget::row!(
+                                widget::column!(
+                                    widget::text::body(fl!("capacity")),
+                                    widget::text::heading(
+                                        humansize::format_size(all_total, humansize::BINARY)
+                                            .to_string()
+                                    )
+                                ),
+                                widget::column!(
+                                    widget::text::body(fl!("in-use")),
+                                    widget::text::heading(format!(
+                                        "{} ({:.1}%)",
+                                        humansize::format_size(all_used, humansize::BINARY),
+                                        100.0 * (all_used as f64) / (all_total as f64)
+                                    ))
+                                ),
+                                widget::column!(
+                                    widget::text::body(fl!("reading")),
+                                    widget::text::heading(format!(
+                                        "{}/s",
+                                        humansize::format_size(all_io.0 as u64, humansize::DECIMAL)
+                                    ))
+                                ),
+                                widget::column!(
+                                    widget::text::body(fl!("writing")),
+                                    widget::text::heading(format!(
+                                        "{}/s",
+                                        humansize::format_size(all_io.1 as u64, humansize::DECIMAL)
+                                    ))
+                                ),
+                            )
+                            .spacing(space_m),
+                            canvas(Graph::new(GraphKind::DiskTotal, &self.graph_history).legend())
+                                .height(LARGE_GRAPH_HEIGHT)
+                                .width(Length::Fill),
+                        )
+                        .spacing(space_xxs)
+                        .into()
+                    },
                 ));
 
                 for disk in graph_item.disks.iter() {
@@ -1728,16 +1750,17 @@ impl Application for App {
                                                 Graph::new(graph_kind, &self.graph_history)
                                                     .legend(),
                                             )
-                                            .height(300.0)
+                                            .height(LARGE_GRAPH_HEIGHT)
                                             .width(Length::Fill)
                                         )
                                         .spacing(space_xxs),
                                     ));
                                 }
-                                if size.width > 800.0 {
-                                    Element::from(widget::row(graphs))
+                                if size.width > MIN_GRAPH_WIDTH + space_xxl as f32 + MIN_GRAPH_WIDTH
+                                {
+                                    Element::from(widget::row(graphs).spacing(space_xxl))
                                 } else {
-                                    Element::from(widget::column(graphs))
+                                    Element::from(widget::column(graphs).spacing(space_xxs))
                                 }
                             })
                         )
@@ -1773,7 +1796,7 @@ impl Application for App {
                         )
                         .spacing(space_m),
                         canvas(Graph::new(GraphKind::NetworkTotal, &self.graph_history).legend())
-                            .height(300.0)
+                            .height(LARGE_GRAPH_HEIGHT)
                             .width(Length::Fill),
                     )
                     .spacing(space_xxs),
@@ -1813,7 +1836,7 @@ impl Application for App {
                                                 Graph::new(graph_kind, &self.graph_history)
                                                     .legend(),
                                             )
-                                            .height(300.0)
+                                            .height(LARGE_GRAPH_HEIGHT)
                                             .width(Length::Fill)
                                         )
                                         .spacing(space_xxs),
