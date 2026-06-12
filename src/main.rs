@@ -1603,7 +1603,7 @@ impl Application for App {
                 }
             }
             (NavPage::Disk, Some(graph_item)) => {
-                let mut column = widget::column::with_capacity(2 + graph_item.disks.len() * 3)
+                let mut column = widget::column::with_capacity(2 + graph_item.disks.len())
                     .spacing(space_l)
                     .width(Length::Fill);
 
@@ -1714,31 +1714,32 @@ impl Application for App {
                                     widget::column!()
                                 }
                             )
-                            .spacing(space_m)
-                        )
-                        .spacing(space_xxs),
-                    );
-                    column = column.push(
-                        widget::column!(
-                            widget::text::title4(fl!("reading")),
-                            canvas(
-                                Graph::new(GraphKind::DiskRead(&disk.name), &self.graph_history)
-                                    .legend(),
-                            )
-                            .height(300.0)
-                            .width(Length::Fill)
-                        )
-                        .spacing(space_xxs),
-                    );
-                    column = column.push(
-                        widget::column!(
-                            widget::text::title4(fl!("writing")),
-                            canvas(
-                                Graph::new(GraphKind::DiskWrite(&disk.name), &self.graph_history)
-                                    .legend(),
-                            )
-                            .height(300.0)
-                            .width(Length::Fill)
+                            .spacing(space_m),
+                            widget::responsive(move |size| {
+                                let mut graphs = Vec::with_capacity(2);
+                                for (title, graph_kind) in [
+                                    (fl!("reading"), GraphKind::DiskRead(&disk.name)),
+                                    (fl!("writing"), GraphKind::DiskWrite(&disk.name)),
+                                ] {
+                                    graphs.push(Element::from(
+                                        widget::column!(
+                                            widget::text::title4(title),
+                                            canvas(
+                                                Graph::new(graph_kind, &self.graph_history)
+                                                    .legend(),
+                                            )
+                                            .height(300.0)
+                                            .width(Length::Fill)
+                                        )
+                                        .spacing(space_xxs),
+                                    ));
+                                }
+                                if size.width > 800.0 {
+                                    Element::from(widget::row(graphs))
+                                } else {
+                                    Element::from(widget::column(graphs))
+                                }
+                            })
                         )
                         .spacing(space_xxs),
                     );
@@ -1746,35 +1747,87 @@ impl Application for App {
                 column.into()
             }
             (NavPage::Network, Some(graph_item)) => {
-                let mut column = widget::column::with_capacity(graph_item.networks.len() * 6)
+                let mut column = widget::column::with_capacity(1 + graph_item.networks.len())
+                    .spacing(space_l)
                     .width(Length::Fill);
+
+                let all_io = graph_item.total_network_io();
+                column = column.push(
+                    widget::column!(
+                        widget::text::title4(fl!("all-networks")),
+                        widget::row!(
+                            widget::column!(
+                                widget::text::body(fl!("receiving")),
+                                widget::text::heading(format!(
+                                    "{}/s",
+                                    humansize::format_size(all_io.0 as u64, humansize::DECIMAL)
+                                ))
+                            ),
+                            widget::column!(
+                                widget::text::body(fl!("sending")),
+                                widget::text::heading(format!(
+                                    "{}/s",
+                                    humansize::format_size(all_io.1 as u64, humansize::DECIMAL)
+                                ))
+                            ),
+                        )
+                        .spacing(space_m),
+                        canvas(Graph::new(GraphKind::NetworkTotal, &self.graph_history).legend())
+                            .height(300.0)
+                            .width(Length::Fill),
+                    )
+                    .spacing(space_xxs),
+                );
+
                 for net in graph_item.networks.iter() {
-                    column = column.push(widget::text(format!("Name: {}", net.name)));
-                    column = column.push(widget::text(format!(
-                        "Rx: {}/s",
-                        humansize::format_size(net.rx as u64, humansize::DECIMAL)
-                    )));
                     column = column.push(
-                        canvas(
-                            Graph::new(GraphKind::NetworkRx(&net.name), &self.graph_history)
-                                .legend(),
+                        widget::column!(
+                            widget::text::title4(&net.name),
+                            widget::row!(
+                                widget::column!(
+                                    widget::text::body(fl!("receiving")),
+                                    widget::text::heading(format!(
+                                        "{}/s",
+                                        humansize::format_size(net.rx as u64, humansize::DECIMAL)
+                                    ))
+                                ),
+                                widget::column!(
+                                    widget::text::body(fl!("sending")),
+                                    widget::text::heading(format!(
+                                        "{}/s",
+                                        humansize::format_size(net.tx as u64, humansize::DECIMAL)
+                                    ))
+                                ),
+                            )
+                            .spacing(space_m),
+                            widget::responsive(move |size| {
+                                let mut graphs = Vec::with_capacity(2);
+                                for (title, graph_kind) in [
+                                    (fl!("receiving"), GraphKind::NetworkRx(&net.name)),
+                                    (fl!("sending"), GraphKind::NetworkTx(&net.name)),
+                                ] {
+                                    graphs.push(Element::from(
+                                        widget::column!(
+                                            widget::text::title4(title),
+                                            canvas(
+                                                Graph::new(graph_kind, &self.graph_history)
+                                                    .legend(),
+                                            )
+                                            .height(300.0)
+                                            .width(Length::Fill)
+                                        )
+                                        .spacing(space_xxs),
+                                    ));
+                                }
+                                if size.width > 800.0 {
+                                    Element::from(widget::row(graphs))
+                                } else {
+                                    Element::from(widget::column(graphs))
+                                }
+                            })
                         )
-                        .height(300.0)
-                        .width(Length::Fill),
+                        .spacing(space_xxs),
                     );
-                    column = column.push(widget::text(format!(
-                        "Tx: {}/s",
-                        humansize::format_size(net.tx as u64, humansize::DECIMAL)
-                    )));
-                    column = column.push(
-                        canvas(
-                            Graph::new(GraphKind::NetworkTx(&net.name), &self.graph_history)
-                                .legend(),
-                        )
-                        .height(300.0)
-                        .width(Length::Fill),
-                    );
-                    column = column.push(widget::space().height(20.0));
                 }
                 column.into()
             }

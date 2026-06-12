@@ -55,6 +55,11 @@ mount-path = Mount path
 reading = Reading
 writing = Writing
 
+## Network
+all-networks = All networks
+receiving = Receiving
+sending = Sending
+
 # Context Pages
 
 ## About
