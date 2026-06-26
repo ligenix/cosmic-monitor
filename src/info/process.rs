@@ -417,7 +417,11 @@ impl ItemInterface<ProcessCategory> for ProcessItem {
                     .and_then(|x| x.icon.as_ref())
                     .map(|x| x.as_str())
                     .unwrap_or("application-x-executable");
-                Some(widget::icon::from_name(icon).size(24).icon())
+                if Path::new(icon).is_absolute() {
+                    Some(widget::icon::from_path(icon.into()).icon().size(24))
+                } else {
+                    Some(widget::icon::from_name(icon).size(24).icon())
+                }
             }
             _ => None,
         }
