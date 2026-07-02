@@ -14,6 +14,7 @@ use cosmic::{
             operation::AbsoluteOffset,
             scrollable::{Direction, Scrollbar, Viewport, scroll_to},
         },
+        window,
     },
     surface, theme,
     widget::{
@@ -987,7 +988,10 @@ impl Application for App {
             scroll_table_id: widget::Id::unique(),
         };
 
-        let command = Task::batch([app.update_config(), app.set_window_title(fl!("app-name"))]);
+        let command = Task::batch([
+            app.update_config(),
+            app.set_window_title(fl!("app-name"), window::Id::RESERVED),
+        ]);
         (app, command)
     }
 
