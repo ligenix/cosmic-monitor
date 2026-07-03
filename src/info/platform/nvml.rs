@@ -1,13 +1,18 @@
 use nvml_wrapper::{
     Nvml, enum_wrappers::device::TemperatureSensor, enums::device::UsedGpuMemory, error::NvmlError,
 };
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    fs,
+    time::{Duration, Instant},
+};
 use sysinfo::{Components, Pid};
 
 use super::{GpuId, GpuItem, Platform};
 
 pub struct NvmlPlatform {
     gpu_items: Vec<GpuItem>,
+    no_processes_time: Option<Instant>,
     last_seen_timestamp: Option<u64>,
     nvml: Option<Nvml>,
     processes: HashMap<Pid, HashMap<GpuId, (f32, u64)>>,
@@ -18,6 +23,7 @@ impl NvmlPlatform {
         Self {
             gpu_items: Vec::new(),
             last_seen_timestamp: None,
+            no_processes_time: None,
             //TODO: only use NVML if GPU is awake
             //TODO: log error?
             nvml: Nvml::init().ok(),
@@ -26,15 +32,70 @@ impl NvmlPlatform {
     }
 
     fn refresh_inner(&mut self, refresh_processes: bool) -> Result<(), NvmlError> {
-        let Some(nvml) = &self.nvml else {
-            return Ok(());
-        };
+        // Check if any GPUs are suspended before reading info. This is currently Linux-only
+        #[cfg(target_os = "linux")]
+        {
+            let mut any_suspended = false;
+            for gpu in self.gpu_items.iter() {
+                match gpu.id {
+                    GpuId::Pci {
+                        domain,
+                        bus,
+                        device,
+                        func,
+                    } => {
+                        let runtime_status_path = format!(
+                            "/sys/bus/pci/devices/{:04x}:{:02x}:{:02x}.{:01x}/power/runtime_status",
+                            domain, bus, device, func,
+                        );
+                        match fs::read_to_string(&runtime_status_path) {
+                            Ok(data) => {
+                                if data.trim() == "suspended" {
+                                    any_suspended = true;
+                                }
+                            }
+                            Err(err) => {
+                                log::debug!("failed to read {}: {}", runtime_status_path, err);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                //TODO: cache per-gpu process count?
+                if self
+                    .processes
+                    .iter()
+                    .any(|(_pid, usages)| usages.contains_key(&gpu.id))
+                {
+                    let elapsed = match self.no_processes_time {
+                        Some(instant) => instant.elapsed(),
+                        None => {
+                            self.no_processes_time = Some(Instant::now());
+                            Duration::ZERO
+                        }
+                    };
+                    if elapsed.as_secs() < 30 {
+                        // Only pretend it is suspended for 30 seconds, then try again
+                        any_suspended = true;
+                    }
+                }
+            }
+            if any_suspended {
+                self.no_processes_time = None;
+                //TODO: Data is now stale!
+                return Ok(());
+            }
+        }
 
         self.gpu_items.clear();
 
         if refresh_processes {
             self.processes.clear();
         }
+
+        let Some(nvml) = &self.nvml else {
+            return Ok(());
+        };
 
         for index in 0..nvml.device_count()? {
             let device = nvml.device_by_index(index)?;
