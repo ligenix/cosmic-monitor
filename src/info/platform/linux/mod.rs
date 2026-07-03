@@ -376,6 +376,35 @@ impl Platform for LinuxPlatform {
                 //TODO: mem_info_vram_total is only available on AMD
                 if let Ok(data) = fs::read_to_string(device_path.join("mem_info_vram_total")) {
                     gpu_item.vram_total = data.trim().parse().ok();
+                } else {
+                    // Try to find largest prefetchable memory BAR and assume that is VRAM
+                    if let Ok(data) = fs::read_to_string(device_path.join("resource")) {
+                        for line in data.lines() {
+                            let mut parts = line.split(" ");
+                            let parse_hex = |string: &str| -> Option<u64> {
+                                u64::from_str_radix(string.trim_start_matches("0x"), 16).ok()
+                            };
+                            let Some(start) = parts.next().and_then(parse_hex) else {
+                                continue;
+                            };
+                            let Some(end) = parts.next().and_then(parse_hex) else {
+                                continue;
+                            };
+                            let Some(flags) = parts.next().and_then(parse_hex) else {
+                                continue;
+                            };
+
+                            const IORESOURCE_MEM: u64 = 0x00000200;
+                            const IORESOURCE_PREFETCH: u64 = 0x00002000;
+                            if (flags & (IORESOURCE_MEM | IORESOURCE_PREFETCH))
+                                == (IORESOURCE_MEM | IORESOURCE_PREFETCH)
+                            {
+                                let len = (end + 1) - start;
+                                gpu_item.vram_total =
+                                    Some(gpu_item.vram_total.unwrap_or(0).max(len));
+                            }
+                        }
+                    }
                 };
 
                 if let Ok(entries) = fs::read_dir(device_path.join("hwmon")) {
