@@ -1626,32 +1626,50 @@ impl Application for App {
                         column = column.push(self.responsive_graph_top_processes(
                             ProcessCategory::GpuUsage(gpu.id, Some(gpu_i)),
                             move || {
+                                let (title, show_data) = match gpu.state {
+                                    GpuState::Normal => (fl!("gpu-utilization"), true),
+                                    GpuState::Idle(instant) => (
+                                        fl!(
+                                            "gpu-utilization-idle",
+                                            seconds = instant.elapsed().as_secs()
+                                        ),
+                                        false,
+                                    ),
+                                    GpuState::Suspended => {
+                                        (fl!("gpu-utilization-suspended"), false)
+                                    }
+                                };
                                 let mut row = widget::row::with_capacity(3).spacing(space_m);
                                 row = row.push(widget::column!(
                                     widget::text::body(fl!("utilization")),
-                                    widget::text::heading(format!("{:.1}%", usage))
+                                    widget::text::heading(if show_data {
+                                        format!("{:.1}%", usage)
+                                    } else {
+                                        "-".to_string()
+                                    })
                                 ));
                                 if let Some(power) = gpu.power {
                                     row = row.push(widget::column!(
                                         widget::text::body(fl!("power")),
-                                        widget::text::heading(format!("{:.1}W", power))
+                                        widget::text::heading(if show_data {
+                                            format!("{:.1}W", power)
+                                        } else {
+                                            "-".to_string()
+                                        })
                                     ));
                                 }
                                 if let Some(temp) = gpu.temp {
                                     row = row.push(widget::column!(
                                         widget::text::body(fl!("temperature")),
-                                        widget::text::heading(format!("{:.1}°C", temp))
+                                        widget::text::heading(if show_data {
+                                            format!("{:.1}°C", temp)
+                                        } else {
+                                            "-".to_string()
+                                        })
                                     ));
                                 }
                                 widget::column!(
-                                    widget::text::title4(match gpu.state {
-                                        GpuState::Normal => fl!("gpu-utilization"),
-                                        GpuState::Idle(instant) => fl!(
-                                            "gpu-utilization-idle",
-                                            seconds = instant.elapsed().as_secs()
-                                        ),
-                                        GpuState::Suspended => fl!("gpu-utilization-suspended"),
-                                    }),
+                                    widget::text::title4(title),
                                     row,
                                     canvas(
                                         Graph::new(
