@@ -89,7 +89,15 @@ impl NvmlPlatform {
                 }
             }
             if skip_refresh {
-                //TODO: Data is now stale!
+                // Data is now stale!
+                for gpu in self.gpu_items.iter_mut() {
+                    // This zeroes GPU usage so the graphs are not broken
+                    gpu.usage = Some(0.0);
+                    gpu.vram_used = Some(0);
+                    // Other unknown values are cleared
+                    gpu.power = None;
+                    gpu.temp = None;
+                }
                 return Ok(());
             }
         }
