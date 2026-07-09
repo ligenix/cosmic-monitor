@@ -1621,111 +1621,109 @@ impl Application for App {
                         )
                         .push(widget::space().height(space_m));
                     let mut column = widget::column::with_capacity(2).spacing(space_l);
-                    if let Some(usage) = gpu.usage {
-                        // GPU utilization and top processes
-                        column = column.push(self.responsive_graph_top_processes(
-                            ProcessCategory::GpuUsage(gpu.id, Some(gpu_i)),
-                            move || {
-                                let (title, show_data) = match gpu.state {
-                                    GpuState::Normal => (fl!("gpu-utilization"), true),
-                                    GpuState::Idle(_) => (fl!("gpu-utilization-idle"), false),
-                                    GpuState::Suspended => {
-                                        (fl!("gpu-utilization-suspended"), false)
-                                    }
-                                };
-                                let mut row = widget::row::with_capacity(3).spacing(space_m);
-                                row = row.push(widget::column!(
-                                    widget::text::body(fl!("utilization")),
-                                    widget::text::heading(if show_data {
-                                        format!("{:.1}%", usage)
-                                    } else {
-                                        "-".to_string()
-                                    })
-                                ));
-                                if let Some(power) = gpu.power {
-                                    row = row.push(widget::column!(
-                                        widget::text::body(fl!("power")),
-                                        widget::text::heading(if show_data {
-                                            format!("{:.1}W", power)
-                                        } else {
-                                            "-".to_string()
-                                        })
-                                    ));
-                                }
-                                if let Some(temp) = gpu.temp {
-                                    row = row.push(widget::column!(
-                                        widget::text::body(fl!("temperature")),
-                                        widget::text::heading(if show_data {
-                                            format!("{:.1}°C", temp)
-                                        } else {
-                                            "-".to_string()
-                                        })
-                                    ));
-                                }
-                                widget::column!(
-                                    widget::text::title4(title),
-                                    row,
-                                    canvas(
-                                        Graph::new(
-                                            GraphKind::GpuUsage(gpu.id),
-                                            &self.graph_history
-                                        )
-                                        .legend(),
-                                    )
-                                    .height(LARGE_GRAPH_HEIGHT)
-                                    .width(Length::Fill),
-                                )
-                                .spacing(space_xxs)
-                                .into()
-                            },
-                        ));
-                    }
-                    if let Some(vram_used) = gpu.vram_used {
-                        if let Some(vram_total) = gpu.vram_total {
-                            // GPU VRAM and top processes
-                            column = column.push(self.responsive_graph_top_processes(
-                                ProcessCategory::GpuVram(gpu.id, Some(gpu_i)),
-                                move || {
-                                    widget::column!(
-                                        widget::text::title4(fl!("gpu-vram")),
-                                        widget::row!(
-                                            widget::column!(
-                                                widget::text::body(fl!("capacity")),
-                                                widget::text::heading(
-                                                    humansize::format_size(
-                                                        vram_total,
-                                                        humansize::BINARY
-                                                    )
-                                                    .to_string()
+                    match gpu.state {
+                        GpuState::Normal => {
+                            if let Some(usage) = gpu.usage {
+                                // GPU utilization and top processes
+                                column = column.push(self.responsive_graph_top_processes(
+                                    ProcessCategory::GpuUsage(gpu.id, Some(gpu_i)),
+                                    move || {
+                                        let mut row =
+                                            widget::row::with_capacity(3).spacing(space_m);
+                                        row = row.push(widget::column!(
+                                            widget::text::body(fl!("utilization")),
+                                            widget::text::heading(format!("{:.1}%", usage))
+                                        ));
+                                        if let Some(power) = gpu.power {
+                                            row = row.push(widget::column!(
+                                                widget::text::body(fl!("power")),
+                                                widget::text::heading(format!("{:.1}W", power))
+                                            ));
+                                        }
+                                        if let Some(temp) = gpu.temp {
+                                            row = row.push(widget::column!(
+                                                widget::text::body(fl!("temperature")),
+                                                widget::text::heading(format!("{:.1}°C", temp))
+                                            ));
+                                        }
+                                        widget::column!(
+                                            widget::text::title4(fl!("gpu-utilization")),
+                                            row,
+                                            canvas(
+                                                Graph::new(
+                                                    GraphKind::GpuUsage(gpu.id),
+                                                    &self.graph_history
                                                 )
-                                            ),
-                                            widget::column!(
-                                                widget::text::body(fl!("vram")),
-                                                widget::text::heading(format!(
-                                                    "{} ({:.1}%)",
-                                                    humansize::format_size(
-                                                        vram_used,
-                                                        humansize::BINARY
-                                                    ),
-                                                    100.0 * (vram_used as f64)
-                                                        / (vram_total as f64)
-                                                ))
-                                            ),
-                                        )
-                                        .spacing(space_m),
-                                        canvas(
-                                            Graph::new(
-                                                GraphKind::GpuVram(gpu.id),
-                                                &self.graph_history
+                                                .legend(),
                                             )
-                                            .legend(),
+                                            .height(LARGE_GRAPH_HEIGHT)
+                                            .width(Length::Fill),
                                         )
-                                        .height(LARGE_GRAPH_HEIGHT)
-                                        .width(Length::Fill),
-                                    )
-                                    .spacing(space_xxs)
-                                    .into()
-                                },
+                                        .spacing(space_xxs)
+                                        .into()
+                                    },
+                                ));
+                            }
+                            if let Some(vram_used) = gpu.vram_used {
+                                if let Some(vram_total) = gpu.vram_total {
+                                    // GPU VRAM and top processes
+                                    column = column.push(self.responsive_graph_top_processes(
+                                        ProcessCategory::GpuVram(gpu.id, Some(gpu_i)),
+                                        move || {
+                                            widget::column!(
+                                                widget::text::title4(fl!("gpu-vram")),
+                                                widget::row!(
+                                                    widget::column!(
+                                                        widget::text::body(fl!("capacity")),
+                                                        widget::text::heading(
+                                                            humansize::format_size(
+                                                                vram_total,
+                                                                humansize::BINARY
+                                                            )
+                                                            .to_string()
+                                                        )
+                                                    ),
+                                                    widget::column!(
+                                                        widget::text::body(fl!("vram")),
+                                                        widget::text::heading(format!(
+                                                            "{} ({:.1}%)",
+                                                            humansize::format_size(
+                                                                vram_used,
+                                                                humansize::BINARY
+                                                            ),
+                                                            100.0 * (vram_used as f64)
+                                                                / (vram_total as f64)
+                                                        ))
+                                                    ),
+                                                )
+                                                .spacing(space_m),
+                                                canvas(
+                                                    Graph::new(
+                                                        GraphKind::GpuVram(gpu.id),
+                                                        &self.graph_history
+                                                    )
+                                                    .legend(),
+                                                )
+                                                .height(LARGE_GRAPH_HEIGHT)
+                                                .width(Length::Fill),
+                                            )
+                                            .spacing(space_xxs)
+                                            .into()
+                                        },
+                                    ));
+                                }
+                            }
+                        }
+                        GpuState::Idle(_) => {
+                            column = column.push(widget::column!(
+                                widget::text::title4(fl!("gpu-idle-title")),
+                                widget::text::body(fl!("gpu-idle-description"))
+                            ));
+                        }
+                        GpuState::Suspended => {
+                            column = column.push(widget::column!(
+                                widget::text::title4(fl!("gpu-suspended-title")),
+                                widget::text::body(fl!("gpu-suspended-description"))
                             ));
                         }
                     }

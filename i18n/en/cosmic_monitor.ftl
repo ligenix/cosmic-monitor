@@ -47,8 +47,10 @@ total-utilization = Total utilization
 
 ## GPU
 gpu-utilization = GPU Utilization
-gpu-utilization-idle = GPU Utilization - Idle
-gpu-utilization-suspended = GPU Utilization - Suspended
+gpu-idle-title = Idle
+gpu-idle-description = Monitoring is disabled to allow the GPU to suspend.
+gpu-suspended-title = Suspended
+gpu-suspended-description = Monitoring is disabled while the GPU is suspended.
 no-gpus = No supported GPUs found.
 power = Power
 vram = VRAM
